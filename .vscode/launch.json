@@ -1,0 +1,56 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "swift",
+      "name": "BKSwitcher: Run Once",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "program": "${workspaceFolder}/.build/debug/bkswitcher",
+      "args": [],
+      "preLaunchTask": "swift: Build Debug bkswitcher"
+    },
+    {
+      "type": "swift",
+      "name": "BKSwitcher: Init Config",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "program": "${workspaceFolder}/.build/debug/bkswitcher",
+      "args": [
+        "--init-config"
+      ],
+      "preLaunchTask": "swift: Build Debug bkswitcher"
+    },
+    {
+      "type": "swift",
+      "name": "BKSwitcher: Loop Mode",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "program": "${workspaceFolder}/.build/debug/bkswitcher",
+      "args": [
+        "--loop"
+      ],
+      "preLaunchTask": "swift: Build Debug bkswitcher"
+    },
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:bkswitcher}",
+      "name": "Debug bkswitcher",
+      "target": "bkswitcher",
+      "configuration": "debug",
+      "preLaunchTask": "swift: Build Debug bkswitcher"
+    },
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:bkswitcher}",
+      "name": "Release bkswitcher",
+      "target": "bkswitcher",
+      "configuration": "release",
+      "preLaunchTask": "swift: Build Release bkswitcher"
+    }
+  ]
+}

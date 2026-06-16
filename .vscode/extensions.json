@@ -1,0 +1,9 @@
+{
+  "recommendations": [
+    "swiftlang.swift-vscode",
+    "llvm-vs-code-extensions.lldb-dap"
+  ],
+  "unwantedRecommendations": [
+    "sswg.swift-lang"
+  ]
+}

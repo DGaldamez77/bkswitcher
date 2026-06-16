@@ -1,0 +1,22 @@
+{
+  "folders": [
+    {
+      "name": "bkswitcher",
+      "path": "."
+    }
+  ],
+  "settings": {
+    "files.exclude": {
+      "**/.build": true
+    },
+    "search.exclude": {
+      "**/.build": true
+    }
+  },
+  "extensions": {
+    "recommendations": [
+      "swiftlang.swift-vscode",
+      "llvm-vs-code-extensions.lldb-dap"
+    ]
+  }
+}

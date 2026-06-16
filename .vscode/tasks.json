@@ -1,0 +1,92 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "type": "swift",
+      "label": "swift: Build Debug bkswitcher",
+      "detail": "swift build",
+      "args": [
+        "build"
+      ],
+      "cwd": "${workspaceFolder}",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "type": "swift",
+      "label": "swift: Build Release bkswitcher",
+      "detail": "swift build -c release",
+      "args": [
+        "build",
+        "-c",
+        "release"
+      ],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "process",
+      "label": "BKSwitcher: Request Photos Permission (VS Code host)",
+      "command": "swift",
+      "args": [
+        "-e",
+        "import Foundation; import Photos; import Dispatch; func statusName(_ status: PHAuthorizationStatus) -> String { switch status { case .notDetermined: return \"notDetermined\"; case .restricted: return \"restricted\"; case .denied: return \"denied\"; case .authorized: return \"authorized\"; case .limited: return \"limited\"; @unknown default: return \"unknown(\\(status.rawValue))\" } }; func finish(_ status: PHAuthorizationStatus) { print(\"Photos auth status: \\(statusName(status)) (raw=\\(status.rawValue))\"); if status == .authorized || status == .limited { exit(0) } else { exit(2) } }; let current = PHPhotoLibrary.authorizationStatus(for: .readWrite); if current == .notDetermined { PHPhotoLibrary.requestAuthorization(for: .readWrite) { status in finish(status) }; dispatchMain() } else { finish(current) }"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "type": "process",
+      "label": "BKSwitcher: Request Photos Permission (Terminal.app)",
+      "command": "open",
+      "args": [
+        "${workspaceFolder}/scripts/request-photos-permission.command"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "type": "process",
+      "label": "BKSwitcher: Run Once (VS Code host)",
+      "command": "swift",
+      "args": [
+        "run",
+        "bkswitcher"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "type": "shell",
+      "label": "BKSwitcher: Open Latest Photo Log",
+      "command": "LATEST=$(ls -t \"$HOME/Library/Caches/BKSwitcher\"/wallpaper-*-photos.txt 2>/dev/null | sed -n '1p'); if [ -z \"$LATEST\" ]; then echo \"No photo log found in ~/Library/Caches/BKSwitcher\" >&2; exit 1; fi; echo \"Opening $LATEST\"; open \"$LATEST\"",
+      "problemMatcher": []
+    },
+    {
+      "type": "shell",
+      "label": "BKSwitcher: Build + Run Once + Open Latest Photo Log (VS Code host)",
+      "command": "echo \"BKSwitcher one-click workflow complete.\"",
+      "dependsOrder": "sequence",
+      "dependsOn": [
+        "BKSwitcher: Request Photos Permission (VS Code host)",
+        "swift: Build Debug bkswitcher",
+        "BKSwitcher: Run Once (VS Code host)",
+        "BKSwitcher: Open Latest Photo Log"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "type": "process",
+      "label": "BKSwitcher: Build + Run Once + Open Latest Photo Log",
+      "command": "open",
+      "args": [
+        "${workspaceFolder}/scripts/one-click-terminal.command"
+      ],
+      "problemMatcher": []
+    }
+  ]
+}

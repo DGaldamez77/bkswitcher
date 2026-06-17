@@ -5,6 +5,7 @@ struct PhotosLibrarySelection {
     let assetLocalIdentifier: String
     let originalFilename: String
     let exportedURL: URL
+    let photoTakenDate: Date?
 }
 
 enum PhotosLibraryCollectorError: LocalizedError {
@@ -218,7 +219,8 @@ struct PhotosLibraryCollector {
                 PhotosLibrarySelection(
                     assetLocalIdentifier: asset.localIdentifier,
                     originalFilename: originalFilename,
-                    exportedURL: destination
+                    exportedURL: destination,
+                    photoTakenDate: asset.creationDate
                 )
             )
         }

@@ -110,6 +110,8 @@ func writeSelectedPhotoLog(
     wallpaperURL: URL,
     logURL: URL
 ) throws {
+    let takenDateFormatter = ISO8601DateFormatter()
+    takenDateFormatter.formatOptions = [.withInternetDateTime]
     var lines: [String] = []
     lines.append("Wallpaper: \(wallpaperURL.path)")
     lines.append("Generated At: \(ISO8601DateFormatter().string(from: Date()))")
@@ -120,6 +122,11 @@ func writeSelectedPhotoLog(
         lines.append("\(index + 1). \(selection.exportedURL.path)")
         lines.append("   assetLocalIdentifier: \(selection.assetLocalIdentifier)")
         lines.append("   originalFilename: \(selection.originalFilename)")
+        if let photoTakenDate = selection.photoTakenDate {
+            lines.append("   photoTakenDate: \(takenDateFormatter.string(from: photoTakenDate))")
+        } else {
+            lines.append("   photoTakenDate: unavailable")
+        }
     }
 
     try lines.joined(separator: "\n").write(to: logURL, atomically: true, encoding: .utf8)

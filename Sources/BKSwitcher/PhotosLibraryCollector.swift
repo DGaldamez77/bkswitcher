@@ -186,43 +186,45 @@ struct PhotosLibraryCollector {
         selections.reserveCapacity(assets.count)
 
         for (index, asset) in assets.enumerated() {
-            var imageData: Data?
-            var exportError: Error?
-            var wasCancelled = false
+            let selection: PhotosLibrarySelection = try autoreleasepool {
+                var imageData: Data?
+                var exportError: Error?
+                var wasCancelled = false
 
-            imageManager.requestImageDataAndOrientation(for: asset, options: requestOptions) { data, _, _, info in
-                if let info {
-                    if let cancelled = info[PHImageCancelledKey] as? Bool, cancelled {
-                        wasCancelled = true
-                        return
+                imageManager.requestImageDataAndOrientation(for: asset, options: requestOptions) { data, _, _, info in
+                    if let info {
+                        if let cancelled = info[PHImageCancelledKey] as? Bool, cancelled {
+                            wasCancelled = true
+                            return
+                        }
+                        if let err = info[PHImageErrorKey] as? Error {
+                            exportError = err
+                            return
+                        }
                     }
-                    if let err = info[PHImageErrorKey] as? Error {
-                        exportError = err
-                        return
-                    }
+                    imageData = data
                 }
-                imageData = data
-            }
 
-            if let exportError {
-                throw PhotosLibraryCollectorError.assetExportFailed(asset.localIdentifier, exportError.localizedDescription)
-            }
-            guard !wasCancelled, let imageData else {
-                throw PhotosLibraryCollectorError.assetExportFailed(asset.localIdentifier, "Image request returned no data.")
-            }
+                if let exportError {
+                    throw PhotosLibraryCollectorError.assetExportFailed(asset.localIdentifier, exportError.localizedDescription)
+                }
+                guard !wasCancelled, let imageData else {
+                    throw PhotosLibraryCollectorError.assetExportFailed(asset.localIdentifier, "Image request returned no data.")
+                }
 
-            let originalFilename = preferredFilename(for: asset)
-            let ext = preferredFileExtension(for: asset) ?? "jpg"
-            let destination = stagingDirectory.appendingPathComponent("asset-\(index)-\(UUID().uuidString)-\(originalFilename).\(ext)")
-            try imageData.write(to: destination, options: .atomic)
-            selections.append(
-                PhotosLibrarySelection(
+                let originalFilename = preferredFilename(for: asset)
+                let ext = preferredFileExtension(for: asset) ?? "jpg"
+                let destination = stagingDirectory.appendingPathComponent("asset-\(index)-\(UUID().uuidString)-\(originalFilename).\(ext)")
+                try imageData.write(to: destination, options: .atomic)
+                return PhotosLibrarySelection(
                     assetLocalIdentifier: asset.localIdentifier,
                     originalFilename: originalFilename,
                     exportedURL: destination,
                     photoTakenDate: asset.creationDate
                 )
-            )
+            }
+
+            selections.append(selection)
         }
 
         return selections

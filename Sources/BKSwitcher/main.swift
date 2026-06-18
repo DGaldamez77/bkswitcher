@@ -218,6 +218,13 @@ func runCycle(config: AppConfig, renderer: CollageRenderer) throws {
     print("Selected photo list: \(logURL.path)")
 }
 
+func runManagedCycle(config: AppConfig, renderer: CollageRenderer) throws {
+    try autoreleasepool {
+        defer { renderer.clearCaches() }
+        try runCycle(config: config, renderer: renderer)
+    }
+}
+
 let arguments = Set(CommandLine.arguments.dropFirst())
 
 if arguments.contains("--help") || arguments.contains("-h") {
@@ -243,17 +250,19 @@ do {
 
     if arguments.contains("--loop") {
         while true {
-            do {
-                try runCycle(config: config, renderer: renderer)
-            } catch {
-                fputs("Cycle failed: \(error.localizedDescription)\n", stderr)
+            autoreleasepool {
+                do {
+                    try runManagedCycle(config: config, renderer: renderer)
+                } catch {
+                    fputs("Cycle failed: \(error.localizedDescription)\n", stderr)
+                }
             }
 
             let interval = TimeInterval(config.refreshIntervalMinutes * 60)
             Thread.sleep(forTimeInterval: interval)
         }
     } else {
-        try runCycle(config: config, renderer: renderer)
+        try runManagedCycle(config: config, renderer: renderer)
     }
 } catch {
     fputs("\(error.localizedDescription)\n", stderr)

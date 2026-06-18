@@ -109,6 +109,10 @@ final class CollageRenderer {
         try data.write(to: outputURL, options: .atomic)
     }
 
+    func clearCaches() {
+        context.clearCaches()
+    }
+
     private func assignImages(_ images: [LoadedImage], to rects: [CGRect]) -> [(image: LoadedImage, rect: CGRect)] {
         guard !images.isEmpty, !rects.isEmpty else {
             return []

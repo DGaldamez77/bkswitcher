@@ -1,4 +1,5 @@
 import Foundation
+import CoreLocation
 import Photos
 
 struct PhotosLibrarySelection {
@@ -6,6 +7,7 @@ struct PhotosLibrarySelection {
     let originalFilename: String
     let exportedURL: URL
     let photoTakenDate: Date?
+    let photoLocationText: String?
 }
 
 enum PhotosLibraryCollectorError: LocalizedError {
@@ -33,6 +35,9 @@ enum PhotosLibraryCollectorError: LocalizedError {
 }
 
 struct PhotosLibraryCollector {
+    private static let geocodeCacheLock = NSLock()
+    private static var geocodeCache: [String: String] = [:]
+    private static let geocodeCacheLimit = 2000
     static func randomPhotos(
         count: Int,
         excludedAlbumNames: [String],
@@ -220,7 +225,8 @@ struct PhotosLibraryCollector {
                     assetLocalIdentifier: asset.localIdentifier,
                     originalFilename: originalFilename,
                     exportedURL: destination,
-                    photoTakenDate: asset.creationDate
+                    photoTakenDate: asset.creationDate,
+                    photoLocationText: formattedLocationText(from: asset.location)
                 )
             }
 
@@ -248,5 +254,102 @@ struct PhotosLibraryCollector {
         }
         let result = String(cleaned).trimmingCharacters(in: .whitespacesAndNewlines)
         return result.isEmpty ? "photo" : result
+    }
+
+    private static func formattedLocationText(from location: CLLocation?) -> String? {
+        guard let location else {
+            return nil
+        }
+
+        let latitude = location.coordinate.latitude
+        let longitude = location.coordinate.longitude
+        guard latitude.isFinite, longitude.isFinite else {
+            return nil
+        }
+        let cacheKey = locationCacheKey(latitude: latitude, longitude: longitude)
+        if let cached = cachedLocationText(for: cacheKey) {
+            return cached
+        }
+
+        guard let resolved = reverseGeocodedLocationText(from: location) else {
+            return nil
+        }
+        storeLocationText(resolved, for: cacheKey)
+        return resolved
+    }
+
+    private static func locationCacheKey(latitude: Double, longitude: Double) -> String {
+        let roundedLatitude = (latitude * 10_000).rounded() / 10_000
+        let roundedLongitude = (longitude * 10_000).rounded() / 10_000
+        return String(format: "%.4f,%.4f", roundedLatitude, roundedLongitude)
+    }
+
+    private static func cachedLocationText(for key: String) -> String? {
+        geocodeCacheLock.lock()
+        defer { geocodeCacheLock.unlock() }
+        return geocodeCache[key]
+    }
+
+    private static func storeLocationText(_ text: String, for key: String) {
+        geocodeCacheLock.lock()
+        defer { geocodeCacheLock.unlock() }
+
+        if geocodeCache.count >= geocodeCacheLimit, let staleKey = geocodeCache.keys.first {
+            geocodeCache.removeValue(forKey: staleKey)
+        }
+        geocodeCache[key] = text
+    }
+
+    private static func reverseGeocodedLocationText(from location: CLLocation) -> String? {
+        let geocoder = CLGeocoder()
+        var resolvedPlacemark: CLPlacemark?
+        var didComplete = false
+
+        geocoder.reverseGeocodeLocation(location) { placemarks, _ in
+            resolvedPlacemark = placemarks?.first
+            didComplete = true
+        }
+
+        let deadline = Date().addingTimeInterval(4)
+        while !didComplete && Date() < deadline {
+            _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
+        }
+        if !didComplete {
+            geocoder.cancelGeocode()
+            return nil
+        }
+
+        guard let placemark = resolvedPlacemark else {
+            return nil
+        }
+
+        let locality = normalizedComponent(placemark.locality)
+            ?? normalizedComponent(placemark.subAdministrativeArea)
+            ?? normalizedComponent(placemark.name)
+        let region = normalizedComponent(placemark.administrativeArea)
+            ?? normalizedComponent(placemark.subAdministrativeArea)
+        let countryCode = normalizedComponent(placemark.isoCountryCode)?.uppercased()
+        let country = normalizedComponent(placemark.country)
+
+        var components: [String] = []
+        if let locality {
+            components.append(locality)
+        }
+        if let region, !components.contains(region) {
+            components.append(region)
+        }
+        if countryCode != "US", let country, !components.contains(country) {
+            components.append(country)
+        }
+
+        return components.isEmpty ? nil : components.joined(separator: ", ")
+    }
+
+    private static func normalizedComponent(_ value: String?) -> String? {
+        guard let value else {
+            return nil
+        }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }

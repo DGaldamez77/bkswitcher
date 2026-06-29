@@ -25,11 +25,23 @@ enum CollageRendererError: LocalizedError {
     }
 }
 
+struct CollageRenderItem {
+    let imageURL: URL
+    let photoTakenDate: Date?
+    let photoLocationText: String?
+}
+
 final class CollageRenderer {
     private let context = CIContext(options: [.cacheIntermediates: false])
     private let minimumTileDimension: CGFloat = 110
     private let landscapeThreshold: CGFloat = 1.12
     private let portraitThreshold: CGFloat = 0.88
+    private let monthYearFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "MM/yyyy"
+        return formatter
+    }()
 
     private enum TileOrientation {
         case landscape
@@ -41,6 +53,8 @@ final class CollageRenderer {
         let image: CIImage
         let aspectRatio: CGFloat
         let orientation: TileOrientation
+        let dateText: String?
+        let locationText: String?
     }
 
     private struct RectInfo {
@@ -50,7 +64,7 @@ final class CollageRenderer {
         let orientation: TileOrientation
     }
 
-    func renderCollage(imageURLs: [URL], canvasSize: CGSize, gap: CGFloat) throws -> CIImage {
+    func renderCollage(items: [CollageRenderItem], canvasSize: CGSize, gap: CGFloat) throws -> CIImage {
         let normalizedCanvas = CGSize(width: floor(canvasSize.width), height: floor(canvasSize.height))
         guard normalizedCanvas.width > 0, normalizedCanvas.height > 0 else {
             throw CollageRendererError.invalidCanvasSize(canvasSize)
@@ -60,16 +74,18 @@ final class CollageRenderer {
         let black = CIImage(color: CIColor(red: 0, green: 0, blue: 0))
         var canvas = black.cropped(to: canvasRect)
         let safeGap = max(0, gap)
-        let layoutRects = mosaicLayout(count: imageURLs.count, in: canvasRect, gap: safeGap)
-        let loadedImages = try imageURLs.map { imageURL in
-            guard let image = loadImage(at: imageURL) else {
-                throw CollageRendererError.imageLoadFailed(imageURL)
+        let layoutRects = mosaicLayout(count: items.count, in: canvasRect, gap: safeGap)
+        let loadedImages = try items.map { item in
+            guard let image = loadImage(at: item.imageURL) else {
+                throw CollageRendererError.imageLoadFailed(item.imageURL)
             }
             let aspectRatio = aspectRatio(of: image.extent.size)
             return LoadedImage(
                 image: image,
                 aspectRatio: aspectRatio,
-                orientation: orientation(forAspectRatio: aspectRatio)
+                orientation: orientation(forAspectRatio: aspectRatio),
+                dateText: formattedMonthYear(from: item.photoTakenDate),
+                locationText: normalizedLocationText(item.photoLocationText)
             )
         }
         let assignedPairs = assignImages(loadedImages, to: layoutRects)
@@ -80,8 +96,14 @@ final class CollageRenderer {
             guard targetRect.width > 1, targetRect.height > 1 else {
                 continue
             }
-            let tile = fitAndCrop(image: pair.image.image, to: targetRect.size)
-                .transformed(by: CGAffineTransform(translationX: targetRect.origin.x, y: targetRect.origin.y))
+            var tile = fitAndCrop(image: pair.image.image, to: targetRect.size)
+            tile = applyMetadataOverlay(
+                to: tile,
+                targetSize: targetRect.size,
+                dateText: pair.image.dateText,
+                locationText: pair.image.locationText
+            )
+            tile = tile.transformed(by: CGAffineTransform(translationX: targetRect.origin.x, y: targetRect.origin.y))
 
             canvas = tile.composited(over: canvas)
             renderedTiles += 1
@@ -111,6 +133,167 @@ final class CollageRenderer {
 
     func clearCaches() {
         context.clearCaches()
+    }
+
+    private enum BadgeAnchor {
+        case topLeft
+        case bottomRight
+    }
+
+    private func formattedMonthYear(from date: Date?) -> String? {
+        guard let date else {
+            return nil
+        }
+        return monthYearFormatter.string(from: date)
+    }
+
+    private func normalizedLocationText(_ text: String?) -> String? {
+        guard let text else {
+            return nil
+        }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func applyMetadataOverlay(
+        to tile: CIImage,
+        targetSize: CGSize,
+        dateText: String?,
+        locationText: String?
+    ) -> CIImage {
+        guard dateText != nil || locationText != nil else {
+            return tile
+        }
+        guard let overlay = metadataOverlayImage(
+            size: targetSize,
+            dateText: dateText,
+            locationText: locationText
+        ) else {
+            return tile
+        }
+        return overlay.composited(over: tile)
+    }
+
+    private func metadataOverlayImage(
+        size: CGSize,
+        dateText: String?,
+        locationText: String?
+    ) -> CIImage? {
+        let normalizedSize = CGSize(width: floor(size.width), height: floor(size.height))
+        guard normalizedSize.width > 2, normalizedSize.height > 2 else {
+            return nil
+        }
+
+        let minDimension = min(normalizedSize.width, normalizedSize.height)
+        let fontSize = max(8, min(16, minDimension * 0.060))
+        let margin = max(4, fontSize * 0.5)
+        let pixelWidth = max(1, Int(normalizedSize.width))
+        let pixelHeight = max(1, Int(normalizedSize.height))
+        guard let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: pixelWidth,
+            pixelsHigh: pixelHeight,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
+            return nil
+        }
+
+        guard let graphicsContext = NSGraphicsContext(bitmapImageRep: bitmap) else {
+            return nil
+        }
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = graphicsContext
+        defer { NSGraphicsContext.restoreGraphicsState() }
+
+        graphicsContext.cgContext.clear(CGRect(origin: .zero, size: normalizedSize))
+
+        if let dateText {
+            drawTextBadge(
+                dateText,
+                anchor: .topLeft,
+                in: normalizedSize,
+                fontSize: fontSize,
+                margin: margin
+            )
+        }
+
+        if let locationText {
+            drawTextBadge(
+                locationText,
+                anchor: .bottomRight,
+                in: normalizedSize,
+                fontSize: fontSize,
+                margin: margin
+            )
+        }
+        guard let cgImage = bitmap.cgImage else {
+            return nil
+        }
+
+        return CIImage(cgImage: cgImage)
+    }
+
+    private func drawTextBadge(
+        _ text: String,
+        anchor: BadgeAnchor,
+        in canvasSize: CGSize,
+        fontSize: CGFloat,
+        margin: CGFloat
+    ) {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = anchor == .topLeft ? .left : .right
+        paragraph.lineBreakMode = .byTruncatingTail
+
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.72)
+        shadow.shadowBlurRadius = max(1.5, fontSize * 0.18)
+        shadow.shadowOffset = NSSize(width: 0, height: -1)
+
+        let font = NSFont.systemFont(ofSize: fontSize, weight: .regular)
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: NSColor.white,
+            .paragraphStyle: paragraph,
+            .shadow: shadow
+        ]
+
+        let maxTextWidth = max(40, canvasSize.width * 0.65)
+        let drawingOptions: NSString.DrawingOptions = [.usesLineFragmentOrigin, .usesFontLeading]
+        let attributed = NSAttributedString(string: text, attributes: attributes)
+        let measured = attributed.boundingRect(
+            with: NSSize(width: maxTextWidth, height: .greatestFiniteMagnitude),
+            options: drawingOptions
+        )
+        let textSize = CGSize(width: ceil(min(maxTextWidth, measured.width)), height: ceil(measured.height))
+        let horizontalPadding = max(3, fontSize * 0.24)
+        let verticalPadding = max(2, fontSize * 0.14)
+        let badgeWidth = textSize.width + horizontalPadding * 2
+        let badgeHeight = textSize.height + verticalPadding * 2
+
+        let originX: CGFloat = anchor == .topLeft
+            ? margin
+            : max(margin, canvasSize.width - margin - badgeWidth)
+        let originY: CGFloat = anchor == .topLeft
+            ? max(margin, canvasSize.height - margin - badgeHeight)
+            : margin
+        let badgeRect = NSRect(x: originX, y: originY, width: badgeWidth, height: badgeHeight)
+
+        let radius = max(4, fontSize * 0.22)
+        NSColor.black.withAlphaComponent(0.24).setFill()
+        NSBezierPath(roundedRect: badgeRect, xRadius: radius, yRadius: radius).fill()
+
+        let textRect = badgeRect.insetBy(dx: horizontalPadding, dy: verticalPadding)
+        attributed.draw(
+            with: textRect,
+            options: [.usesLineFragmentOrigin, .usesFontLeading, .truncatesLastVisibleLine]
+        )
     }
 
     private func assignImages(_ images: [LoadedImage], to rects: [CGRect]) -> [(image: LoadedImage, rect: CGRect)] {

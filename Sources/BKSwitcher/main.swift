@@ -127,6 +127,11 @@ func writeSelectedPhotoLog(
         } else {
             lines.append("   photoTakenDate: unavailable")
         }
+        if let photoLocationText = selection.photoLocationText {
+            lines.append("   photoLocation: \(photoLocationText)")
+        } else {
+            lines.append("   photoLocation: unavailable")
+        }
     }
 
     try lines.joined(separator: "\n").write(to: logURL, atomically: true, encoding: .utf8)
@@ -189,11 +194,20 @@ func runCycle(config: AppConfig, renderer: CollageRenderer) throws {
         stagingDirectory: stagingDirectory
     )
     logInfo("Selected and exported \(selected.count) photo(s) into \(stagingDirectory.path)")
+    let selectedWithReadableLocation = selected.filter { $0.photoLocationText != nil }.count
+    logInfo("Resolved readable location for \(selectedWithReadableLocation)/\(selected.count) selected photo(s).")
     let canvasSize = currentCanvasSize()
     logInfo("Rendering collage at \(Int(canvasSize.width))x\(Int(canvasSize.height)) with tile gap \(config.tileGap).")
+    let renderItems = selected.map { selection in
+        CollageRenderItem(
+            imageURL: selection.exportedURL,
+            photoTakenDate: selection.photoTakenDate,
+            photoLocationText: selection.photoLocationText
+        )
+    }
 
     let collage = try renderer.renderCollage(
-        imageURLs: selected.map(\.exportedURL),
+        items: renderItems,
         canvasSize: canvasSize,
         gap: CGFloat(config.tileGap)
     )

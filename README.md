@@ -34,6 +34,7 @@ This creates:
 ## Example config
 ```json
 {
+  "allowDockRestart" : false,
   "allowedExtensions" : [
     "jpg",
     "jpeg",
@@ -57,6 +58,10 @@ This creates:
 Set `excludedAlbums` to Photos album names that should never appear in collages. Matching is case-insensitive and excludes all photos in those albums.
 Set `imageCount` to how many photos should be used in each collage.
 Set `tileGap` to the pixel gap between photo tiles.
+Set `allowDockRestart` to `true` only if you need the legacy `desktoppicture.db` fallback. It is `false` by default because applying that fallback requires restarting the Dock, and a Dock restart un-minimizes every minimized window. When enabled, BKSwitcher snapshots minimized windows before the restart and re-minimizes them afterwards (this needs Accessibility permission for the host app).
+
+## Minimized windows
+Wallpaper updates leave window state alone. BKSwitcher applies wallpapers via NSWorkspace, Finder/System Events AppleScript, and the modern `com.apple.wallpaper` store, none of which touch windows. The Dock is never restarted unless you opt in with `allowDockRestart`.
 
 ## Photo path output
 Each run writes:

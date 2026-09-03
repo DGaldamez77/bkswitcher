@@ -21,6 +21,9 @@ struct AppConfig: Codable {
     var outputDirectory: String
     var refreshIntervalMinutes: Int
     var allowedExtensions: [String]
+    /// Restarting the Dock un-minimizes every minimized window, so the legacy Dock wallpaper
+    /// fallback stays off unless explicitly enabled.
+    var allowDockRestart: Bool
 
     static let configDirectoryName = "BKSwitcher"
     static let configFileName = "config.json"
@@ -35,6 +38,7 @@ struct AppConfig: Codable {
         case outputDirectory
         case refreshIntervalMinutes
         case allowedExtensions
+        case allowDockRestart
     }
 
     static var defaultValue: AppConfig {
@@ -44,7 +48,8 @@ struct AppConfig: Codable {
             tileGap: 6,
             outputDirectory: "~/Library/Caches/BKSwitcher",
             refreshIntervalMinutes: 15,
-            allowedExtensions: ["jpg", "jpeg", "png", "heic", "heif", "tif", "tiff"]
+            allowedExtensions: ["jpg", "jpeg", "png", "heic", "heif", "tif", "tiff"],
+            allowDockRestart: false
         )
     }
 
@@ -143,6 +148,7 @@ extension AppConfig {
         outputDirectory = try container.decode(String.self, forKey: .outputDirectory)
         refreshIntervalMinutes = try container.decode(Int.self, forKey: .refreshIntervalMinutes)
         allowedExtensions = try container.decode([String].self, forKey: .allowedExtensions)
+        allowDockRestart = try container.decodeIfPresent(Bool.self, forKey: .allowDockRestart) ?? false
     }
 
     func encode(to encoder: Encoder) throws {
@@ -153,5 +159,6 @@ extension AppConfig {
         try container.encode(outputDirectory, forKey: .outputDirectory)
         try container.encode(refreshIntervalMinutes, forKey: .refreshIntervalMinutes)
         try container.encode(allowedExtensions, forKey: .allowedExtensions)
+        try container.encode(allowDockRestart, forKey: .allowDockRestart)
     }
 }

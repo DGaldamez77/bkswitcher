@@ -221,7 +221,10 @@ func runCycle(config: AppConfig, renderer: CollageRenderer) throws {
     let wallpaperSource = try prepareWallpaperSource(from: destination, in: outputDirectory, keep: retainedRunCount)
     logInfo("Prepared wallpaper source slot: \(wallpaperSource.path)")
     logInfo("Wallpaper slot inventory: \(wallpaperSlotCount(in: outputDirectory))/\(retainedRunCount)")
-    try WallpaperSetter.setDesktopWallpaper(imageURL: wallpaperSource) { detail in
+    try WallpaperSetter.setDesktopWallpaper(
+        imageURL: wallpaperSource,
+        allowDockRestart: config.allowDockRestart
+    ) { detail in
         logInfo("Wallpaper: \(detail)")
     }
     let removedRunCount = pruneOldCollages(in: outputDirectory, keep: retainedRunCount)

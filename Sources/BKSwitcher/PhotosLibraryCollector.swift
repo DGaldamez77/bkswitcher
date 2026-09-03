@@ -60,6 +60,28 @@ struct PhotosLibraryCollector {
         return try exportAssets(selectedAssets, to: stagingDirectory)
     }
 
+    /// Re-exports a known set of assets, preserving the requested identifier order. Identifiers that
+    /// no longer resolve (deleted from the library) are omitted, so callers must handle a short result.
+    static func exportAssets(
+        withLocalIdentifiers identifiers: [String],
+        stagingDirectory: URL
+    ) throws -> [PhotosLibrarySelection] {
+        guard !identifiers.isEmpty else {
+            return []
+        }
+
+        try ensureAuthorization()
+
+        let fetched = PHAsset.fetchAssets(withLocalIdentifiers: identifiers, options: nil)
+        var assetsByIdentifier: [String: PHAsset] = [:]
+        fetched.enumerateObjects { asset, _, _ in
+            assetsByIdentifier[asset.localIdentifier] = asset
+        }
+
+        let orderedAssets = identifiers.compactMap { assetsByIdentifier[$0] }
+        return try exportAssets(orderedAssets, to: stagingDirectory)
+    }
+
     private static func ensureAuthorization() throws {
         let current = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         switch current {

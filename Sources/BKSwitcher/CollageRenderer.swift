@@ -31,6 +31,25 @@ struct CollageRenderItem {
     let photoLocationText: String?
 }
 
+/// SplitMix64. The mosaic layout is randomized, so rendering is driven by an explicit seeded
+/// generator instead of the system RNG. Recording the seed lets a later run redraw an identical
+/// collage from the same photo set.
+struct SeededRandomNumberGenerator: RandomNumberGenerator {
+    private var state: UInt64
+
+    init(seed: UInt64) {
+        self.state = seed
+    }
+
+    mutating func next() -> UInt64 {
+        state = state &+ 0x9E37_79B9_7F4A_7C15
+        var z = state
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        return z ^ (z >> 31)
+    }
+}
+
 final class CollageRenderer {
     private let context = CIContext(options: [.cacheIntermediates: false])
     private let minimumTileDimension: CGFloat = 110
@@ -64,12 +83,21 @@ final class CollageRenderer {
         let orientation: TileOrientation
     }
 
-    func renderCollage(items: [CollageRenderItem], canvasSize: CGSize, gap: CGFloat) throws -> CIImage {
+    /// Seeded per render so an identical `seed`, photo set, canvas, and gap reproduce the same collage.
+    private var layoutGenerator = SeededRandomNumberGenerator(seed: 0)
+
+    func renderCollage(
+        items: [CollageRenderItem],
+        canvasSize: CGSize,
+        gap: CGFloat,
+        seed: UInt64
+    ) throws -> CIImage {
         let normalizedCanvas = CGSize(width: floor(canvasSize.width), height: floor(canvasSize.height))
         guard normalizedCanvas.width > 0, normalizedCanvas.height > 0 else {
             throw CollageRendererError.invalidCanvasSize(canvasSize)
         }
 
+        layoutGenerator = SeededRandomNumberGenerator(seed: seed)
         let canvasRect = CGRect(origin: .zero, size: normalizedCanvas)
         let black = CIImage(color: CIColor(red: 0, green: 0, blue: 0))
         var canvas = black.cropped(to: canvasRect)
@@ -445,7 +473,7 @@ final class CollageRenderer {
     private func split(rect: CGRect, gap: CGFloat) -> (CGRect, CGRect)? {
         let minDimension = minimumTileDimension + gap
         let splitAlongWidth = rect.width >= rect.height
-        let ratio = CGFloat.random(in: 0.34...0.66)
+        let ratio = CGFloat.random(in: 0.34...0.66, using: &layoutGenerator)
 
         if splitAlongWidth {
             let proposed = rect.minX + rect.width * ratio

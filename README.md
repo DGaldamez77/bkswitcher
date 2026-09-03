@@ -68,9 +68,11 @@ Each run writes:
 - Wallpaper image: `~/Library/Caches/BKSwitcher/wallpaper-<timestamp>.jpg`
 - Photo list file: `~/Library/Caches/BKSwitcher/wallpaper-<timestamp>-photos.txt`
 - Exported source images used for that run: `~/Library/Caches/BKSwitcher/used-photos/<timestamp>/...`
+- Run manifest used by `-r`: `~/Library/Caches/BKSwitcher/wallpaper-<timestamp>-run.json`
 - Wallpaper source rotation files used for System Settings list stability: `~/Library/Caches/BKSwitcher/wallpaper-slots/slot-<1...6>.jpg`
 
 The `-photos.txt` file lists the exact exported file path for each photo used, plus the Photos asset identifier and original filename.
+The `-run.json` manifest is the machine-readable record of a run: the ordered photo set, canvas size, tile gap, and the layout seed. Because the mosaic layout is randomized, the seed is what allows `-r` to reproduce a previous collage exactly.
 BKSwitcher automatically prunes run artifacts so only the latest 6 timestamped collages/logs/used-photo folders are kept.
 
 ## Run modes
@@ -83,6 +85,15 @@ Continuous loop:
 ```bash
 swift run bkswitcher --loop
 ```
+
+Recreate the last run:
+```bash
+swift run bkswitcher -r
+```
+
+`-r` (or `--recreate`) skips random photo selection and rebuilds the most recent collage from the same photos, in the same order, with the same mosaic layout and tile gap.
+
+The photos are always re-exported fresh from the Photos library by asset identifier, so any edits you have made in Photos since the original run (crops, adjustments, filters) are picked up. Photo dates and locations are re-read from the library as well. If nothing about the photos has changed, the result is byte-identical to the original; if a photo was edited, that tile reflects the current version. Photos deleted from the library since the original run are skipped with a warning, and dropping photos changes the tile count so the layout will differ. `-r` cannot be combined with `--loop`.
 
 ## LaunchAgent (hourly background refresh)
 An example plist is included at:

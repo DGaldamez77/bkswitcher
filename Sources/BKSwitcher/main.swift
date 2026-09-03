@@ -23,6 +23,7 @@ func printUsage() {
 
         Usage:
           bkswitcher                 Run once and update wallpaper
+          bkswitcher -r              Recreate the last run's collage from the same photos and layout
           bkswitcher --loop          Run continuously using refreshIntervalMinutes from config
           bkswitcher --init-config   Create config template at ~/Library/Application Support/BKSwitcher/config.json
           bkswitcher --help          Show this help
@@ -137,6 +138,32 @@ func writeSelectedPhotoLog(
     try lines.joined(separator: "\n").write(to: logURL, atomically: true, encoding: .utf8)
 }
 
+/// Rebuilds the previous run's photo selection by re-exporting the recorded photos from the
+/// Photos library. This ensures that if photos have been edited since the original run, the
+/// recreate uses the current versions. Deleted photos are skipped with a warning.
+func recreateSelections(
+    manifest: RunManifest,
+    stagingDirectory: URL
+) throws -> [PhotosLibrarySelection] {
+    let assetIdentifiers = manifest.photos.map { $0.assetLocalIdentifier }
+    logInfo("Re-exporting \(assetIdentifiers.count) photo(s) from the Photos library.")
+    let reExported = try PhotosLibraryCollector.exportAssets(
+        withLocalIdentifiers: assetIdentifiers,
+        stagingDirectory: stagingDirectory
+    )
+
+    guard !reExported.isEmpty else {
+        throw RunManifestError.emptyManifest(manifest.stamp)
+    }
+
+    if reExported.count < manifest.photos.count {
+        let missingCount = manifest.photos.count - reExported.count
+        logInfo("\(missingCount) photo(s) from the original run are no longer in the Photos library (deleted).")
+    }
+
+    return reExported
+}
+
 @discardableResult
 func pruneOldCollages(in directory: URL, keep count: Int) -> Int {
     guard count > 0 else {
@@ -167,6 +194,7 @@ func pruneOldCollages(in directory: URL, keep count: Int) -> Int {
             let stamp = String(basename.dropFirst("wallpaper-".count))
             let usedPhotosDir = directory.appendingPathComponent("used-photos/\(stamp)", isDirectory: true)
             try? fileManager.removeItem(at: usedPhotosDir)
+            try? fileManager.removeItem(at: RunManifest.url(in: directory, stamp: stamp))
         }
         try? fileManager.removeItem(at: logURL)
         try? fileManager.removeItem(at: stale)
@@ -176,28 +204,46 @@ func pruneOldCollages(in directory: URL, keep count: Int) -> Int {
     return removedRunCount
 }
 
-func runCycle(config: AppConfig, renderer: CollageRenderer) throws {
-    let neededCount = config.imageCount
+func runCycle(config: AppConfig, renderer: CollageRenderer, recreateLastRun: Bool = false) throws {
     let outputDirectory = config.resolvedOutputDirectoryURL()
     let stamp = runStamp()
     let stagingDirectory = selectedPhotosDirectory(in: outputDirectory, stamp: stamp)
-    let excludedAlbumCount = config.normalizedExcludedAlbumNames().count
 
     logInfo("Cycle started at \(stamp).")
     logInfo("Using output directory: \(outputDirectory.path)")
-    logInfo("Selecting \(neededCount) photo(s) from Photos library (excluded albums: \(excludedAlbumCount)).")
 
-    let selected = try PhotosLibraryCollector.randomPhotos(
-        count: neededCount,
-        excludedAlbumNames: config.normalizedExcludedAlbumNames(),
-        allowedExtensions: config.allowedExtensionSet(),
-        stagingDirectory: stagingDirectory
-    )
-    logInfo("Selected and exported \(selected.count) photo(s) into \(stagingDirectory.path)")
+    let selected: [PhotosLibrarySelection]
+    let layoutSeed: UInt64
+    let tileGap: Double
+
+    if recreateLastRun {
+        let manifest = try RunManifest.loadLatest(in: outputDirectory)
+        logInfo("Recreating run \(manifest.stamp): \(manifest.photos.count) photo(s), layout seed \(manifest.layoutSeed), tile gap \(manifest.tileGap).")
+        selected = try recreateSelections(
+            manifest: manifest,
+            stagingDirectory: stagingDirectory
+        )
+        layoutSeed = manifest.layoutSeed
+        tileGap = manifest.tileGap
+    } else {
+        let neededCount = config.imageCount
+        let excludedAlbumCount = config.normalizedExcludedAlbumNames().count
+        logInfo("Selecting \(neededCount) photo(s) from Photos library (excluded albums: \(excludedAlbumCount)).")
+        selected = try PhotosLibraryCollector.randomPhotos(
+            count: neededCount,
+            excludedAlbumNames: config.normalizedExcludedAlbumNames(),
+            allowedExtensions: config.allowedExtensionSet(),
+            stagingDirectory: stagingDirectory
+        )
+        layoutSeed = UInt64.random(in: UInt64.min...UInt64.max)
+        tileGap = config.tileGap
+    }
+
+    logInfo("Prepared \(selected.count) photo(s) in \(stagingDirectory.path)")
     let selectedWithReadableLocation = selected.filter { $0.photoLocationText != nil }.count
     logInfo("Resolved readable location for \(selectedWithReadableLocation)/\(selected.count) selected photo(s).")
     let canvasSize = currentCanvasSize()
-    logInfo("Rendering collage at \(Int(canvasSize.width))x\(Int(canvasSize.height)) with tile gap \(config.tileGap).")
+    logInfo("Rendering collage at \(Int(canvasSize.width))x\(Int(canvasSize.height)) with tile gap \(tileGap) and layout seed \(layoutSeed).")
     let renderItems = selected.map { selection in
         CollageRenderItem(
             imageURL: selection.exportedURL,
@@ -209,7 +255,8 @@ func runCycle(config: AppConfig, renderer: CollageRenderer) throws {
     let collage = try renderer.renderCollage(
         items: renderItems,
         canvasSize: canvasSize,
-        gap: CGFloat(config.tileGap)
+        gap: CGFloat(tileGap),
+        seed: layoutSeed
     )
 
     let destination = outputURL(in: outputDirectory, stamp: stamp)
@@ -218,6 +265,26 @@ func runCycle(config: AppConfig, renderer: CollageRenderer) throws {
     let logURL = selectedPhotosLogURL(in: outputDirectory, stamp: stamp)
     try writeSelectedPhotoLog(selections: selected, wallpaperURL: destination, logURL: logURL)
     logInfo("Saved selected photo log: \(logURL.path)")
+
+    let manifest = RunManifest(
+        stamp: stamp,
+        generatedAt: Date(),
+        canvasWidth: Double(canvasSize.width),
+        canvasHeight: Double(canvasSize.height),
+        tileGap: tileGap,
+        layoutSeed: layoutSeed,
+        photos: selected.map { selection in
+            RunManifestPhoto(
+                assetLocalIdentifier: selection.assetLocalIdentifier,
+                originalFilename: selection.originalFilename,
+                exportedFilename: selection.exportedURL.lastPathComponent,
+                photoTakenDate: selection.photoTakenDate,
+                photoLocationText: selection.photoLocationText
+            )
+        }
+    )
+    let manifestURL = try manifest.write(in: outputDirectory)
+    logInfo("Saved run manifest: \(manifestURL.path)")
     let wallpaperSource = try prepareWallpaperSource(from: destination, in: outputDirectory, keep: retainedRunCount)
     logInfo("Prepared wallpaper source slot: \(wallpaperSource.path)")
     logInfo("Wallpaper slot inventory: \(wallpaperSlotCount(in: outputDirectory))/\(retainedRunCount)")
@@ -235,10 +302,10 @@ func runCycle(config: AppConfig, renderer: CollageRenderer) throws {
     print("Selected photo list: \(logURL.path)")
 }
 
-func runManagedCycle(config: AppConfig, renderer: CollageRenderer) throws {
+func runManagedCycle(config: AppConfig, renderer: CollageRenderer, recreateLastRun: Bool = false) throws {
     try autoreleasepool {
         defer { renderer.clearCaches() }
-        try runCycle(config: config, renderer: renderer)
+        try runCycle(config: config, renderer: renderer, recreateLastRun: recreateLastRun)
     }
 }
 
@@ -261,6 +328,13 @@ if arguments.contains("--init-config") {
     }
 }
 
+let shouldRecreateLastRun = arguments.contains("-r") || arguments.contains("--recreate")
+
+if shouldRecreateLastRun && arguments.contains("--loop") {
+    fputs("--recreate/-r rebuilds a single past run and cannot be combined with --loop.\n", stderr)
+    exit(1)
+}
+
 do {
     let config = try AppConfig.load()
     let renderer = CollageRenderer()
@@ -279,7 +353,7 @@ do {
             Thread.sleep(forTimeInterval: interval)
         }
     } else {
-        try runManagedCycle(config: config, renderer: renderer)
+        try runManagedCycle(config: config, renderer: renderer, recreateLastRun: shouldRecreateLastRun)
     }
 } catch {
     fputs("\(error.localizedDescription)\n", stderr)

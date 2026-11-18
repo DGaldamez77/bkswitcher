@@ -219,11 +219,12 @@ func runCycle(config: AppConfig, renderer: CollageRenderer, recreateLastRun: Boo
     let layoutSeed: UInt64
     let tileGap: Double
     let pictureMarginPixels: Double
+    let pictureSpacingPixels: Double
     let useOptimalLayout: Bool
 
     if recreateLastRun {
         let manifest = try RunManifest.loadLatest(in: outputDirectory)
-        logInfo("Recreating run \(manifest.stamp): \(manifest.photos.count) photo(s), layout seed \(manifest.layoutSeed), tile gap \(manifest.tileGap), picture margin \(manifest.pictureMarginPixels), optimal layout \(manifest.useOptimalLayout).")
+        logInfo("Recreating run \(manifest.stamp): \(manifest.photos.count) photo(s), layout seed \(manifest.layoutSeed), tile gap \(manifest.tileGap), picture margin \(manifest.pictureMarginPixels), picture spacing \(manifest.pictureSpacingPixels), optimal layout \(manifest.useOptimalLayout).")
         selected = try recreateSelections(
             manifest: manifest,
             stagingDirectory: stagingDirectory
@@ -231,6 +232,7 @@ func runCycle(config: AppConfig, renderer: CollageRenderer, recreateLastRun: Boo
         layoutSeed = manifest.layoutSeed
         tileGap = manifest.tileGap
         pictureMarginPixels = manifest.pictureMarginPixels
+        pictureSpacingPixels = manifest.pictureSpacingPixels
         useOptimalLayout = manifest.useOptimalLayout
     } else {
         let neededCount = config.imageCount
@@ -245,6 +247,7 @@ func runCycle(config: AppConfig, renderer: CollageRenderer, recreateLastRun: Boo
         layoutSeed = UInt64.random(in: UInt64.min...UInt64.max)
         tileGap = config.tileGap
         pictureMarginPixels = config.pictureMarginPixels
+        pictureSpacingPixels = config.pictureSpacingPixels
         useOptimalLayout = config.useOptimalCollageLayout
     }
 
@@ -252,7 +255,7 @@ func runCycle(config: AppConfig, renderer: CollageRenderer, recreateLastRun: Boo
     let selectedWithReadableLocation = selected.filter { $0.photoLocationText != nil }.count
     logInfo("Resolved readable location for \(selectedWithReadableLocation)/\(selected.count) selected photo(s).")
     let canvasSize = currentCanvasSize()
-    let layoutDescription = useOptimalLayout ? "optimal (picture margin \(pictureMarginPixels))" : "mosaic (tile gap \(tileGap))"
+    let layoutDescription = useOptimalLayout ? "optimal (picture margin \(pictureMarginPixels), picture spacing \(pictureSpacingPixels))" : "mosaic (tile gap \(tileGap))"
     logInfo("Rendering collage at \(Int(canvasSize.width))x\(Int(canvasSize.height)) using \(layoutDescription) layout, layout seed \(layoutSeed).")
     let renderItems = selected.map { selection in
         CollageRenderItem(
@@ -268,7 +271,8 @@ func runCycle(config: AppConfig, renderer: CollageRenderer, recreateLastRun: Boo
         gap: CGFloat(tileGap),
         seed: layoutSeed,
         useOptimalLayout: useOptimalLayout,
-        pictureMargin: CGFloat(pictureMarginPixels)
+        pictureMargin: CGFloat(pictureMarginPixels),
+        pictureSpacing: CGFloat(pictureSpacingPixels)
     )
 
     let destination = outputURL(in: outputDirectory, stamp: stamp)
@@ -286,6 +290,7 @@ func runCycle(config: AppConfig, renderer: CollageRenderer, recreateLastRun: Boo
         tileGap: tileGap,
         layoutSeed: layoutSeed,
         pictureMarginPixels: pictureMarginPixels,
+        pictureSpacingPixels: pictureSpacingPixels,
         useOptimalLayout: useOptimalLayout,
         photos: selected.map { selection in
             RunManifestPhoto(
@@ -334,7 +339,7 @@ if arguments.contains("--init-config") {
     do {
         let url = try AppConfig.initializeTemplate(overwrite: false)
         print("Config ready: \(url.path)")
-        print("Adjust excludedAlbums/imageCount/tileGap/pictureMarginPixels/useOptimalCollageLayout as needed, then run bkswitcher.")
+        print("Adjust excludedAlbums/imageCount/tileGap/pictureMarginPixels/pictureSpacingPixels/useOptimalCollageLayout as needed, then run bkswitcher.")
         exit(0)
     } catch {
         fputs("Failed to initialize config: \(error.localizedDescription)\n", stderr)

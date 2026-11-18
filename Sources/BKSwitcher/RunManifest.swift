@@ -94,6 +94,7 @@ struct RunManifest: Codable {
     let tileGap: Double
     let layoutSeed: UInt64
     let pictureMarginPixels: Double
+    let pictureSpacingPixels: Double
     let useOptimalLayout: Bool
     let photos: [RunManifestPhoto]
 
@@ -107,6 +108,7 @@ struct RunManifest: Codable {
         case tileGap
         case layoutSeed
         case pictureMarginPixels
+        case pictureSpacingPixels
         case useOptimalLayout
         case photos
     }
@@ -127,6 +129,7 @@ struct RunManifest: Codable {
         tileGap: Double,
         layoutSeed: UInt64,
         pictureMarginPixels: Double,
+        pictureSpacingPixels: Double,
         useOptimalLayout: Bool,
         photos: [RunManifestPhoto]
     ) {
@@ -137,6 +140,7 @@ struct RunManifest: Codable {
         self.tileGap = tileGap
         self.layoutSeed = layoutSeed
         self.pictureMarginPixels = pictureMarginPixels
+        self.pictureSpacingPixels = pictureSpacingPixels
         self.useOptimalLayout = useOptimalLayout
         self.photos = photos
     }
@@ -152,6 +156,7 @@ struct RunManifest: Codable {
         tileGap = try container.decode(Double.self, forKey: .tileGap)
         layoutSeed = try container.decode(UInt64.self, forKey: .layoutSeed)
         pictureMarginPixels = try container.decodeIfPresent(Double.self, forKey: .pictureMarginPixels) ?? 10
+        pictureSpacingPixels = try container.decodeIfPresent(Double.self, forKey: .pictureSpacingPixels) ?? 10
         useOptimalLayout = try container.decodeIfPresent(Bool.self, forKey: .useOptimalLayout) ?? false
         photos = try container.decode([RunManifestPhoto].self, forKey: .photos)
     }
@@ -165,6 +170,7 @@ struct RunManifest: Codable {
         try container.encode(tileGap, forKey: .tileGap)
         try container.encode(layoutSeed, forKey: .layoutSeed)
         try container.encode(pictureMarginPixels, forKey: .pictureMarginPixels)
+        try container.encode(pictureSpacingPixels, forKey: .pictureSpacingPixels)
         try container.encode(useOptimalLayout, forKey: .useOptimalLayout)
         try container.encode(photos, forKey: .photos)
     }

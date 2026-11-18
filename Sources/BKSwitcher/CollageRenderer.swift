@@ -55,10 +55,10 @@ final class CollageRenderer {
     private let minimumTileDimension: CGFloat = 110
     private let landscapeThreshold: CGFloat = 1.12
     private let portraitThreshold: CGFloat = 0.88
-    private let monthYearFormatter: DateFormatter = {
+    private let takenDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "MM/yyyy"
+        formatter.dateFormat = "MM/dd/yyyy"
         return formatter
     }()
 
@@ -92,7 +92,8 @@ final class CollageRenderer {
         gap: CGFloat,
         seed: UInt64,
         useOptimalLayout: Bool = false,
-        pictureMargin: CGFloat = 15
+        pictureMargin: CGFloat = 15,
+        pictureSpacing: CGFloat = 10
     ) throws -> CIImage {
         let normalizedCanvas = CGSize(width: floor(canvasSize.width), height: floor(canvasSize.height))
         guard normalizedCanvas.width > 0, normalizedCanvas.height > 0 else {
@@ -113,7 +114,7 @@ final class CollageRenderer {
                 image: image,
                 aspectRatio: aspectRatio,
                 orientation: orientation(forAspectRatio: aspectRatio),
-                dateText: formattedMonthYear(from: item.photoTakenDate),
+                dateText: formattedTakenDate(from: item.photoTakenDate),
                 locationText: normalizedLocationText(item.photoLocationText)
             )
         }
@@ -124,7 +125,8 @@ final class CollageRenderer {
                 images: loadedImages,
                 canvasRect: canvasRect,
                 baseCanvas: baseCanvas,
-                margin: max(0, pictureMargin)
+                margin: max(0, pictureMargin),
+                spacing: max(0, pictureSpacing)
             )
         } else {
             canvas = try renderMosaicCollage(
@@ -178,73 +180,76 @@ final class CollageRenderer {
         return canvas
     }
 
-    /// New layout: reuses the same recursive rect partitioning as the legacy mosaic (so cells
-    /// always tile the full canvas edge-to-edge, using the entire width and height with no
-    /// letterbox bands), but each photo is fit inside its cell without cropping, so it keeps its
-    /// original proportions. Photos are centered within their cell and get a white margin hugging
-    /// their own edges; wherever a cell's shape doesn't match its photo's aspect ratio, the leftover
-    /// space is simply left as black background, so pictures are not forced to align with their
-    /// neighbors.
+    /// New layout: recursively partitions the canvas into randomly-sized cells (so every region of
+    /// the screen gets a photo), then scatters the photos collage-style: each photo keeps its
+    /// original proportions (never cropped), gets a random size and position within its cell, and
+    /// is then grown toward its neighbors. Each photo has a white margin hugging its edges, and
+    /// framed photos are always at least `spacing` pixels apart so borders never touch.
     private func renderJustifiedCollage(
         images loadedImages: [LoadedImage],
         canvasRect: CGRect,
         baseCanvas: CIImage,
-        margin: CGFloat
+        margin: CGFloat,
+        spacing: CGFloat
     ) throws -> CIImage {
         guard !loadedImages.isEmpty else {
             throw CollageRendererError.emptyRenderResult
         }
 
-        let cellRects = mosaicLayout(count: loadedImages.count, in: canvasRect, gap: 0)
+        let cellRects = mosaicLayout(
+            count: loadedImages.count,
+            in: canvasRect,
+            gap: 0,
+            randomizeSplitDirection: true
+        )
         let assignedPairs = assignImages(loadedImages, to: cellRects)
+        let placements = scatterPlacements(
+            for: assignedPairs,
+            canvasRect: canvasRect,
+            margin: margin,
+            spacing: spacing
+        )
 
         var canvas = baseCanvas
         var renderedTiles = 0
 
-        for pair in assignedPairs {
-            let cellRect = pair.rect
-            guard cellRect.width > 1, cellRect.height > 1 else {
+        for placement in placements {
+            let photoRect = placement.photoRect
+            guard photoRect.width > 1, photoRect.height > 1 else {
                 continue
             }
 
-            let insetRect = cellRect.insetBy(dx: margin, dy: margin)
-            let fitRect = (insetRect.width > 1 && insetRect.height > 1) ? insetRect : cellRect
-
-            let contained = fitContain(image: pair.image.image, to: fitRect.size)
-            guard contained.extent.width > 1, contained.extent.height > 1 else {
-                continue
-            }
-
-            // fitContain letterboxes within (0, 0, fitRect.size), so the photo's actual pixels may
-            // be offset from that box's origin. Normalize to (0, 0), then track the offset
-            // separately so the photo stays centered once placed on the canvas.
-            let letterboxOffset = contained.extent.origin
-            let normalizedPhoto = contained.transformed(
-                by: CGAffineTransform(translationX: -letterboxOffset.x, y: -letterboxOffset.y)
+            // Build the framed photo (white border + photo + metadata) at origin, then rotate and
+            // position it on the canvas as a unit.
+            let unrotatedFrame = photoRect.insetBy(dx: -margin, dy: -margin)
+            let localPhotoRect = CGRect(
+                x: margin,
+                y: margin,
+                width: photoRect.width,
+                height: photoRect.height
             )
-            let finalOrigin = CGPoint(
-                x: fitRect.origin.x + letterboxOffset.x,
-                y: fitRect.origin.y + letterboxOffset.y
-            )
-            let positionedPhoto = normalizedPhoto.transformed(
-                by: CGAffineTransform(translationX: finalOrigin.x, y: finalOrigin.y)
-            )
+            let localFrameRect = CGRect(origin: .zero, size: unrotatedFrame.size)
 
-            // The margin frame hugs the photo's own tight bounding rect (guaranteed to stay inside
-            // cellRect since fitRect was already inset by margin), not the whole irregular cell.
-            let photoRect = CGRect(origin: finalOrigin, size: normalizedPhoto.extent.size)
-            let frameRect = photoRect.insetBy(dx: -margin, dy: -margin)
-
-            canvas = whiteRect(frameRect).composited(over: canvas)
-            canvas = positionedPhoto.composited(over: canvas)
-            canvas = drawBorderMetadata(
-                onto: canvas,
-                frameRect: frameRect,
-                photoRect: photoRect,
+            var tile = whiteRect(localFrameRect)
+            let scaledTile = scaledPhoto(placement.image.image, toFill: localPhotoRect)
+            tile = scaledTile.composited(over: tile)
+            tile = drawBorderMetadata(
+                onto: tile,
+                frameRect: localFrameRect,
+                photoRect: localPhotoRect,
                 margin: margin,
-                dateText: pair.image.dateText,
-                locationText: pair.image.locationText
+                dateText: placement.image.dateText,
+                locationText: placement.image.locationText
             )
+
+            // Rotate tile around its center, then translate so its center lands at placement.center.
+            let tileCenter = CGPoint(x: unrotatedFrame.width / 2, y: unrotatedFrame.height / 2)
+            let rotated = tile
+                .transformed(by: CGAffineTransform(translationX: -tileCenter.x, y: -tileCenter.y))
+                .transformed(by: CGAffineTransform(rotationAngle: placement.rotation))
+                .transformed(by: CGAffineTransform(translationX: placement.center.x, y: placement.center.y))
+
+            canvas = rotated.composited(over: canvas)
             renderedTiles += 1
         }
 
@@ -252,6 +257,223 @@ final class CollageRenderer {
             throw CollageRendererError.emptyRenderResult
         }
         return canvas
+    }
+
+    private struct ScatterPlacement {
+        let image: LoadedImage
+        /// Center of the photo; the growth pass may nudge it toward open space.
+        var center: CGPoint
+        /// Photo size (without the white margin) at scale 1.
+        let baseSize: CGSize
+        var scale: CGFloat
+        let margin: CGFloat
+        /// Rotation in radians (small tilt for hand-made collage feel).
+        let rotation: CGFloat
+
+        var photoRect: CGRect {
+            let width = round(baseSize.width * scale)
+            let height = round(baseSize.height * scale)
+            return CGRect(
+                x: round(center.x - width / 2),
+                y: round(center.y - height / 2),
+                width: width,
+                height: height
+            )
+        }
+
+        /// Axis-aligned bounding box of the rotated frame (used for collision detection).
+        var frameRect: CGRect {
+            let photo = photoRect
+            let frame = photo.insetBy(dx: -margin, dy: -margin)
+            return rotatedBoundingBox(frame, rotation: rotation, around: center)
+        }
+
+        func frameRect(atScale candidate: CGFloat, center candidateCenter: CGPoint? = nil) -> CGRect {
+            var copy = self
+            copy.scale = candidate
+            if let candidateCenter {
+                copy.center = candidateCenter
+            }
+            return copy.frameRect
+        }
+
+        /// Returns the axis-aligned bounding box of `rect` after rotating it by `angle` radians
+        /// around `pivot`.
+        private func rotatedBoundingBox(_ rect: CGRect, rotation angle: CGFloat, around pivot: CGPoint) -> CGRect {
+            let corners = [
+                CGPoint(x: rect.minX, y: rect.minY),
+                CGPoint(x: rect.maxX, y: rect.minY),
+                CGPoint(x: rect.maxX, y: rect.maxY),
+                CGPoint(x: rect.minX, y: rect.maxY)
+            ]
+            let cosA = cos(angle)
+            let sinA = sin(angle)
+            var minX = CGFloat.greatestFiniteMagnitude
+            var minY = CGFloat.greatestFiniteMagnitude
+            var maxX = -CGFloat.greatestFiniteMagnitude
+            var maxY = -CGFloat.greatestFiniteMagnitude
+            for corner in corners {
+                let dx = corner.x - pivot.x
+                let dy = corner.y - pivot.y
+                let rx = pivot.x + dx * cosA - dy * sinA
+                let ry = pivot.y + dx * sinA + dy * cosA
+                minX = min(minX, rx)
+                minY = min(minY, ry)
+                maxX = max(maxX, rx)
+                maxY = max(maxY, ry)
+            }
+            return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+        }
+    }
+
+    /// Turns the partition cells into a loose, collage-like scatter while guaranteeing that framed
+    /// photos never come closer than `spacing` pixels to each other:
+    /// 1. Each photo starts at a random size (a fraction of the largest size that fits its cell)
+    ///    at a random position inside its cell, so neighbors no longer line up on shared edges.
+    /// 2. Over a few rounds, in random order, each photo tries a handful of small nudges toward
+    ///    open space and keeps whichever position lets it grow largest before its frame would come
+    ///    within `spacing` of another frame or the canvas edge (capped so no photo balloons far
+    ///    past its cell's share). This soaks up much of the empty black space while keeping the
+    ///    irregular, off-grid arrangement.
+    private func scatterPlacements(
+        for pairs: [(image: LoadedImage, rect: CGRect)],
+        canvasRect: CGRect,
+        margin: CGFloat,
+        spacing: CGFloat
+    ) -> [ScatterPlacement] {
+        let halfSpacing = spacing / 2
+        let initialScaleRange: ClosedRange<CGFloat> = 0.62...0.9
+        let maximumGrowth: CGFloat = 1.5
+        let growthRounds = 3
+        let maxTiltDegrees: CGFloat = 4.0
+        let tiltRange = -maxTiltDegrees...maxTiltDegrees
+
+        var placements: [ScatterPlacement] = []
+        placements.reserveCapacity(pairs.count)
+
+        for pair in pairs {
+            // Each cell owns a region inset by half the spacing, so two neighboring regions are
+            // always at least `spacing` apart.
+            let region = pair.rect.insetBy(dx: halfSpacing, dy: halfSpacing)
+            let photoBounds = region.insetBy(dx: margin, dy: margin)
+            guard photoBounds.width > 4, photoBounds.height > 4 else {
+                continue
+            }
+
+            let aspect = pair.image.aspectRatio
+            let fitScale = min(photoBounds.width / aspect, photoBounds.height)
+            let baseSize = CGSize(width: fitScale * aspect, height: fitScale)
+
+            let startScale = CGFloat.random(in: initialScaleRange, using: &layoutGenerator)
+            let startFrame = CGSize(
+                width: baseSize.width * startScale + margin * 2,
+                height: baseSize.height * startScale + margin * 2
+            )
+            let slackX = max(0, region.width - startFrame.width)
+            let slackY = max(0, region.height - startFrame.height)
+            let originX = region.minX + CGFloat.random(in: 0...1, using: &layoutGenerator) * slackX
+            let originY = region.minY + CGFloat.random(in: 0...1, using: &layoutGenerator) * slackY
+            let center = CGPoint(x: originX + startFrame.width / 2, y: originY + startFrame.height / 2)
+
+            let tiltDegrees = CGFloat.random(in: tiltRange, using: &layoutGenerator)
+            let tiltRadians = tiltDegrees * .pi / 180
+
+            placements.append(
+                ScatterPlacement(
+                    image: pair.image,
+                    center: center,
+                    baseSize: baseSize,
+                    scale: startScale,
+                    margin: margin,
+                    rotation: tiltRadians
+                )
+            )
+        }
+
+        let allowedArea = canvasRect.insetBy(dx: halfSpacing, dy: halfSpacing)
+        let growthOrder = Array(placements.indices).shuffled(using: &layoutGenerator)
+
+        func isValid(_ frame: CGRect, excluding index: Int) -> Bool {
+            guard allowedArea.contains(frame) else {
+                return false
+            }
+            let padded = frame.insetBy(dx: -spacing, dy: -spacing)
+            for other in placements.indices where other != index {
+                if padded.intersects(placements[other].frameRect) {
+                    return false
+                }
+            }
+            return true
+        }
+
+        func largestValidScale(for index: Int, center: CGPoint) -> CGFloat? {
+            var low = placements[index].scale
+            guard isValid(placements[index].frameRect(atScale: low, center: center), excluding: index) else {
+                return nil
+            }
+            var high = maximumGrowth
+            guard high > low else {
+                return low
+            }
+            if isValid(placements[index].frameRect(atScale: high, center: center), excluding: index) {
+                return high
+            }
+            for _ in 0..<18 {
+                let mid = (low + high) / 2
+                if isValid(placements[index].frameRect(atScale: mid, center: center), excluding: index) {
+                    low = mid
+                } else {
+                    high = mid
+                }
+            }
+            return low
+        }
+
+        let nudgeStep = min(canvasRect.width, canvasRect.height) * 0.03
+        let directions: [CGPoint] = [
+            CGPoint(x: 1, y: 0), CGPoint(x: -1, y: 0), CGPoint(x: 0, y: 1), CGPoint(x: 0, y: -1),
+            CGPoint(x: 0.707, y: 0.707), CGPoint(x: -0.707, y: 0.707),
+            CGPoint(x: 0.707, y: -0.707), CGPoint(x: -0.707, y: -0.707)
+        ]
+
+        for _ in 0..<growthRounds {
+            for index in growthOrder {
+                let current = placements[index].center
+                var bestCenter = current
+                var bestScale = largestValidScale(for: index, center: current) ?? placements[index].scale
+                for direction in directions {
+                    for multiplier in [1.0, 2.0, 3.0] as [CGFloat] {
+                        let candidate = CGPoint(
+                            x: current.x + direction.x * nudgeStep * multiplier,
+                            y: current.y + direction.y * nudgeStep * multiplier
+                        )
+                        if let scale = largestValidScale(for: index, center: candidate), scale > bestScale + 0.005 {
+                            bestScale = scale
+                            bestCenter = candidate
+                        }
+                    }
+                }
+                placements[index].center = bestCenter
+                placements[index].scale = bestScale
+            }
+        }
+
+        return placements
+    }
+
+    /// Uniformly scales `image` so it fills `rect` (whose aspect ratio already matches the photo's,
+    /// give or take pixel rounding) and positions it there.
+    private func scaledPhoto(_ image: CIImage, toFill rect: CGRect) -> CIImage {
+        let normalized = image.transformed(
+            by: CGAffineTransform(translationX: -image.extent.origin.x, y: -image.extent.origin.y)
+        )
+        let scale = max(rect.width / max(normalized.extent.width, 1), rect.height / max(normalized.extent.height, 1))
+        let scaled = normalized.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        let offsetX = (rect.width - scaled.extent.width) / 2
+        let offsetY = (rect.height - scaled.extent.height) / 2
+        return scaled
+            .transformed(by: CGAffineTransform(translationX: rect.minX + offsetX, y: rect.minY + offsetY))
+            .cropped(to: rect)
     }
 
     func writeJPEG(image: CIImage, to outputURL: URL, compression: CGFloat = 0.92) throws {
@@ -284,11 +506,11 @@ final class CollageRenderer {
         case right
     }
 
-    private func formattedMonthYear(from date: Date?) -> String? {
+    private func formattedTakenDate(from date: Date?) -> String? {
         guard let date else {
             return nil
         }
-        return monthYearFormatter.string(from: date)
+        return takenDateFormatter.string(from: date)
     }
 
     private func normalizedLocationText(_ text: String?) -> String? {
@@ -541,7 +763,7 @@ final class CollageRenderer {
             .paragraphStyle: paragraph
         ]
 
-        let horizontalPadding = max(2, fontSize * 0.2)
+        let horizontalPadding = max(6, fontSize * 0.5)
         let maxTextWidth = max(10, normalizedSize.width - horizontalPadding * 2)
         let attributed = NSAttributedString(string: text, attributes: attributes)
         let measured = attributed.boundingRect(
@@ -660,7 +882,12 @@ final class CollageRenderer {
         abs(log(Double(lhs)) - log(Double(rhs)))
     }
 
-    private func mosaicLayout(count: Int, in canvasRect: CGRect, gap: CGFloat) -> [CGRect] {
+    private func mosaicLayout(
+        count: Int,
+        in canvasRect: CGRect,
+        gap: CGFloat,
+        randomizeSplitDirection: Bool = false
+    ) -> [CGRect] {
         guard count > 0 else {
             return []
         }
@@ -672,7 +899,7 @@ final class CollageRenderer {
             }
 
             let rect = partitions.remove(at: splitIndex)
-            guard let splitRects = split(rect: rect, gap: gap) else {
+            guard let splitRects = split(rect: rect, gap: gap, randomizeDirection: randomizeSplitDirection) else {
                 partitions.append(rect)
                 break
             }
@@ -709,9 +936,20 @@ final class CollageRenderer {
             }
     }
 
-    private func split(rect: CGRect, gap: CGFloat) -> (CGRect, CGRect)? {
+    /// `randomizeDirection` (used by the scattered collage) lets a near-square rect split either way
+    /// instead of always across its longer side, which breaks up the row/column feel. The legacy
+    /// mosaic keeps the deterministic rule so `-r` reproduces old mosaic runs exactly.
+    private func split(rect: CGRect, gap: CGFloat, randomizeDirection: Bool = false) -> (CGRect, CGRect)? {
         let minDimension = minimumTileDimension + gap
-        let splitAlongWidth = rect.width >= rect.height
+        var splitAlongWidth = rect.width >= rect.height
+        if randomizeDirection {
+            let rectAspect = rect.width / max(rect.height, 1)
+            let canSplitWidth = rect.width >= minDimension * 2
+            let canSplitHeight = rect.height >= minDimension * 2
+            if rectAspect > 0.6, rectAspect < 1.7, canSplitWidth, canSplitHeight {
+                splitAlongWidth = Bool.random(using: &layoutGenerator)
+            }
+        }
         let ratio = CGFloat.random(in: 0.34...0.66, using: &layoutGenerator)
 
         if splitAlongWidth {
@@ -785,28 +1023,6 @@ final class CollageRenderer {
         let widthScale = targetSize.width / originNormalized.extent.width
         let heightScale = targetSize.height / originNormalized.extent.height
         let scale = max(widthScale, heightScale)
-
-        let scaled = originNormalized.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-        let xOffset = (targetSize.width - scaled.extent.width) / 2
-        let yOffset = (targetSize.height - scaled.extent.height) / 2
-        let centered = scaled.transformed(by: CGAffineTransform(translationX: xOffset, y: yOffset))
-
-        return centered.cropped(to: CGRect(origin: .zero, size: targetSize))
-    }
-
-    /// Scales `image` to fit entirely inside `targetSize` (letterboxed, never cropped), preserving
-    /// its aspect ratio exactly. Used by the justified layout so photos are never distorted or cut.
-    private func fitContain(image: CIImage, to targetSize: CGSize) -> CIImage {
-        let originNormalized = image.transformed(
-            by: CGAffineTransform(translationX: -image.extent.origin.x, y: -image.extent.origin.y)
-        )
-        guard originNormalized.extent.width > 0, originNormalized.extent.height > 0 else {
-            return originNormalized
-        }
-
-        let widthScale = targetSize.width / originNormalized.extent.width
-        let heightScale = targetSize.height / originNormalized.extent.height
-        let scale = min(widthScale, heightScale)
 
         let scaled = originNormalized.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
         let xOffset = (targetSize.width - scaled.extent.width) / 2

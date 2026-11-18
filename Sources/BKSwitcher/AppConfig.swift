@@ -7,7 +7,7 @@ enum AppConfigError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .templateCreated(let url):
-            return "Created config template at \(url.path). Optionally set excludedAlbums/imageCount/tileGap/pictureMarginPixels/useOptimalCollageLayout, then run bkswitcher again."
+            return "Created config template at \(url.path). Optionally set excludedAlbums/imageCount/tileGap/pictureMarginPixels/pictureSpacingPixels/useOptimalCollageLayout, then run bkswitcher again."
         case .invalidConfig(let message):
             return "Invalid config: \(message)"
         }
@@ -26,6 +26,8 @@ struct AppConfig: Codable {
     var allowDockRestart: Bool
     /// White border drawn around every picture in the optimal collage layout, in pixels.
     var pictureMarginPixels: Double
+    /// Minimum black gap between neighboring framed pictures in the optimal collage layout, in pixels.
+    var pictureSpacingPixels: Double
     /// Feature flag selecting the new proportion-preserving, tightly-packed collage layout
     /// instead of the legacy cropped mosaic layout.
     var useOptimalCollageLayout: Bool
@@ -45,6 +47,7 @@ struct AppConfig: Codable {
         case allowedExtensions
         case allowDockRestart
         case pictureMarginPixels
+        case pictureSpacingPixels
         case useOptimalCollageLayout
     }
 
@@ -58,6 +61,7 @@ struct AppConfig: Codable {
             allowedExtensions: ["jpg", "jpeg", "png", "heic", "heif", "tif", "tiff"],
             allowDockRestart: false,
             pictureMarginPixels: 15,
+            pictureSpacingPixels: 10,
             useOptimalCollageLayout: true
         )
     }
@@ -133,6 +137,9 @@ struct AppConfig: Codable {
         guard pictureMarginPixels >= 0 else {
             throw AppConfigError.invalidConfig("pictureMarginPixels cannot be negative.")
         }
+        guard pictureSpacingPixels >= 0 else {
+            throw AppConfigError.invalidConfig("pictureSpacingPixels cannot be negative.")
+        }
     }
 }
 
@@ -162,6 +169,7 @@ extension AppConfig {
         allowedExtensions = try container.decode([String].self, forKey: .allowedExtensions)
         allowDockRestart = try container.decodeIfPresent(Bool.self, forKey: .allowDockRestart) ?? false
         pictureMarginPixels = try container.decodeIfPresent(Double.self, forKey: .pictureMarginPixels) ?? 15
+        pictureSpacingPixels = try container.decodeIfPresent(Double.self, forKey: .pictureSpacingPixels) ?? 10
         useOptimalCollageLayout = try container.decodeIfPresent(Bool.self, forKey: .useOptimalCollageLayout) ?? true
     }
 
@@ -175,6 +183,7 @@ extension AppConfig {
         try container.encode(allowedExtensions, forKey: .allowedExtensions)
         try container.encode(allowDockRestart, forKey: .allowDockRestart)
         try container.encode(pictureMarginPixels, forKey: .pictureMarginPixels)
+        try container.encode(pictureSpacingPixels, forKey: .pictureSpacingPixels)
         try container.encode(useOptimalCollageLayout, forKey: .useOptimalCollageLayout)
     }
 }

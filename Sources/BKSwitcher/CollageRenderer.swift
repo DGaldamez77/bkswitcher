@@ -90,7 +90,9 @@ final class CollageRenderer {
         items: [CollageRenderItem],
         canvasSize: CGSize,
         gap: CGFloat,
-        seed: UInt64
+        seed: UInt64,
+        useOptimalLayout: Bool = false,
+        pictureMargin: CGFloat = 15
     ) throws -> CIImage {
         let normalizedCanvas = CGSize(width: floor(canvasSize.width), height: floor(canvasSize.height))
         guard normalizedCanvas.width > 0, normalizedCanvas.height > 0 else {
@@ -100,10 +102,9 @@ final class CollageRenderer {
         layoutGenerator = SeededRandomNumberGenerator(seed: seed)
         let canvasRect = CGRect(origin: .zero, size: normalizedCanvas)
         let black = CIImage(color: CIColor(red: 0, green: 0, blue: 0))
-        var canvas = black.cropped(to: canvasRect)
-        let safeGap = max(0, gap)
-        let layoutRects = mosaicLayout(count: items.count, in: canvasRect, gap: safeGap)
-        let loadedImages = try items.map { item in
+        let baseCanvas = black.cropped(to: canvasRect)
+
+        let loadedImages = try items.map { item -> LoadedImage in
             guard let image = loadImage(at: item.imageURL) else {
                 throw CollageRendererError.imageLoadFailed(item.imageURL)
             }
@@ -116,6 +117,40 @@ final class CollageRenderer {
                 locationText: normalizedLocationText(item.photoLocationText)
             )
         }
+
+        let canvas: CIImage
+        if useOptimalLayout {
+            canvas = try renderJustifiedCollage(
+                images: loadedImages,
+                canvasRect: canvasRect,
+                baseCanvas: baseCanvas,
+                margin: max(0, pictureMargin)
+            )
+        } else {
+            canvas = try renderMosaicCollage(
+                images: loadedImages,
+                canvasRect: canvasRect,
+                baseCanvas: baseCanvas,
+                gap: max(0, gap)
+            )
+        }
+
+        // Safety net in case any layout arithmetic produces a tile extent that slightly overshoots
+        // the canvas bounds.
+        return canvas.cropped(to: canvasRect)
+    }
+
+    /// Legacy layout: recursively partitions the canvas into randomly-sized rects and crops each
+    /// photo to fill its rect exactly (cover-fit), leaving the black background visible in the gap
+    /// between tiles.
+    private func renderMosaicCollage(
+        images loadedImages: [LoadedImage],
+        canvasRect: CGRect,
+        baseCanvas: CIImage,
+        gap: CGFloat
+    ) throws -> CIImage {
+        var canvas = baseCanvas
+        let layoutRects = mosaicLayout(count: loadedImages.count, in: canvasRect, gap: gap)
         let assignedPairs = assignImages(loadedImages, to: layoutRects)
 
         var renderedTiles = 0
@@ -134,6 +169,82 @@ final class CollageRenderer {
             tile = tile.transformed(by: CGAffineTransform(translationX: targetRect.origin.x, y: targetRect.origin.y))
 
             canvas = tile.composited(over: canvas)
+            renderedTiles += 1
+        }
+
+        guard renderedTiles > 0 else {
+            throw CollageRendererError.emptyRenderResult
+        }
+        return canvas
+    }
+
+    /// New layout: reuses the same recursive rect partitioning as the legacy mosaic (so cells
+    /// always tile the full canvas edge-to-edge, using the entire width and height with no
+    /// letterbox bands), but each photo is fit inside its cell without cropping, so it keeps its
+    /// original proportions. Photos are centered within their cell and get a white margin hugging
+    /// their own edges; wherever a cell's shape doesn't match its photo's aspect ratio, the leftover
+    /// space is simply left as black background, so pictures are not forced to align with their
+    /// neighbors.
+    private func renderJustifiedCollage(
+        images loadedImages: [LoadedImage],
+        canvasRect: CGRect,
+        baseCanvas: CIImage,
+        margin: CGFloat
+    ) throws -> CIImage {
+        guard !loadedImages.isEmpty else {
+            throw CollageRendererError.emptyRenderResult
+        }
+
+        let cellRects = mosaicLayout(count: loadedImages.count, in: canvasRect, gap: 0)
+        let assignedPairs = assignImages(loadedImages, to: cellRects)
+
+        var canvas = baseCanvas
+        var renderedTiles = 0
+
+        for pair in assignedPairs {
+            let cellRect = pair.rect
+            guard cellRect.width > 1, cellRect.height > 1 else {
+                continue
+            }
+
+            let insetRect = cellRect.insetBy(dx: margin, dy: margin)
+            let fitRect = (insetRect.width > 1 && insetRect.height > 1) ? insetRect : cellRect
+
+            let contained = fitContain(image: pair.image.image, to: fitRect.size)
+            guard contained.extent.width > 1, contained.extent.height > 1 else {
+                continue
+            }
+
+            // fitContain letterboxes within (0, 0, fitRect.size), so the photo's actual pixels may
+            // be offset from that box's origin. Normalize to (0, 0), then track the offset
+            // separately so the photo stays centered once placed on the canvas.
+            let letterboxOffset = contained.extent.origin
+            let normalizedPhoto = contained.transformed(
+                by: CGAffineTransform(translationX: -letterboxOffset.x, y: -letterboxOffset.y)
+            )
+            let finalOrigin = CGPoint(
+                x: fitRect.origin.x + letterboxOffset.x,
+                y: fitRect.origin.y + letterboxOffset.y
+            )
+            let positionedPhoto = normalizedPhoto.transformed(
+                by: CGAffineTransform(translationX: finalOrigin.x, y: finalOrigin.y)
+            )
+
+            // The margin frame hugs the photo's own tight bounding rect (guaranteed to stay inside
+            // cellRect since fitRect was already inset by margin), not the whole irregular cell.
+            let photoRect = CGRect(origin: finalOrigin, size: normalizedPhoto.extent.size)
+            let frameRect = photoRect.insetBy(dx: -margin, dy: -margin)
+
+            canvas = whiteRect(frameRect).composited(over: canvas)
+            canvas = positionedPhoto.composited(over: canvas)
+            canvas = drawBorderMetadata(
+                onto: canvas,
+                frameRect: frameRect,
+                photoRect: photoRect,
+                margin: margin,
+                dateText: pair.image.dateText,
+                locationText: pair.image.locationText
+            )
             renderedTiles += 1
         }
 
@@ -166,6 +277,11 @@ final class CollageRenderer {
     private enum BadgeAnchor {
         case topLeft
         case bottomRight
+    }
+
+    private enum BorderTextAlignment {
+        case left
+        case right
     }
 
     private func formattedMonthYear(from date: Date?) -> String? {
@@ -322,6 +438,129 @@ final class CollageRenderer {
             with: textRect,
             options: [.usesLineFragmentOrigin, .usesFontLeading, .truncatesLastVisibleLine]
         )
+    }
+
+    /// Draws the date (top-left) and location (bottom-right) directly into the white border band
+    /// around a photo, rather than over the photo itself. Text is solid black (no shadow/badge
+    /// needed since it already sits on white) and sized to fit inside the border thickness.
+    private func drawBorderMetadata(
+        onto canvas: CIImage,
+        frameRect: CGRect,
+        photoRect: CGRect,
+        margin: CGFloat,
+        dateText: String?,
+        locationText: String?
+    ) -> CIImage {
+        guard margin > 4, dateText != nil || locationText != nil else {
+            return canvas
+        }
+
+        let fontSize = max(6, min(margin - 5, 16))
+        var result = canvas
+
+        if let dateText {
+            let topBand = CGRect(
+                x: frameRect.minX,
+                y: photoRect.maxY,
+                width: frameRect.width,
+                height: frameRect.maxY - photoRect.maxY
+            )
+            if let textImage = borderTextImage(dateText, in: topBand.size, fontSize: fontSize, alignment: .left) {
+                result = textImage
+                    .transformed(by: CGAffineTransform(translationX: topBand.minX, y: topBand.minY))
+                    .composited(over: result)
+            }
+        }
+
+        if let locationText {
+            let bottomBand = CGRect(
+                x: frameRect.minX,
+                y: frameRect.minY,
+                width: frameRect.width,
+                height: photoRect.minY - frameRect.minY
+            )
+            if let textImage = borderTextImage(locationText, in: bottomBand.size, fontSize: fontSize, alignment: .right) {
+                result = textImage
+                    .transformed(by: CGAffineTransform(translationX: bottomBand.minX, y: bottomBand.minY))
+                    .composited(over: result)
+            }
+        }
+
+        return result
+    }
+
+    /// Renders a single line of solid black text, aligned left or right and vertically centered,
+    /// within a thin band (typically the white border above/below a photo). Returns nil if the
+    /// band is too small to draw into.
+    private func borderTextImage(
+        _ text: String,
+        in size: CGSize,
+        fontSize: CGFloat,
+        alignment: BorderTextAlignment
+    ) -> CIImage? {
+        let normalizedSize = CGSize(width: floor(size.width), height: floor(size.height))
+        guard normalizedSize.width > 2, normalizedSize.height > 2 else {
+            return nil
+        }
+
+        let pixelWidth = max(1, Int(normalizedSize.width))
+        let pixelHeight = max(1, Int(normalizedSize.height))
+        guard let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: pixelWidth,
+            pixelsHigh: pixelHeight,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
+            return nil
+        }
+
+        guard let graphicsContext = NSGraphicsContext(bitmapImageRep: bitmap) else {
+            return nil
+        }
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = graphicsContext
+        defer { NSGraphicsContext.restoreGraphicsState() }
+
+        graphicsContext.cgContext.clear(CGRect(origin: .zero, size: normalizedSize))
+
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = alignment == .left ? .left : .right
+        paragraph.lineBreakMode = .byTruncatingTail
+
+        let font = NSFont.systemFont(ofSize: fontSize, weight: .medium)
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: NSColor.black,
+            .paragraphStyle: paragraph
+        ]
+
+        let horizontalPadding = max(2, fontSize * 0.2)
+        let maxTextWidth = max(10, normalizedSize.width - horizontalPadding * 2)
+        let attributed = NSAttributedString(string: text, attributes: attributes)
+        let measured = attributed.boundingRect(
+            with: NSSize(width: maxTextWidth, height: normalizedSize.height),
+            options: [.usesLineFragmentOrigin, .usesFontLeading]
+        )
+
+        let textOriginY = max(0, (normalizedSize.height - measured.height) / 2)
+        let textRect = NSRect(x: horizontalPadding, y: textOriginY, width: maxTextWidth, height: measured.height)
+        attributed.draw(
+            with: textRect,
+            options: [.usesLineFragmentOrigin, .usesFontLeading, .truncatesLastVisibleLine]
+        )
+
+        guard let cgImage = bitmap.cgImage else {
+            return nil
+        }
+
+        return CIImage(cgImage: cgImage)
     }
 
     private func assignImages(_ images: [LoadedImage], to rects: [CGRect]) -> [(image: LoadedImage, rect: CGRect)] {
@@ -553,5 +792,34 @@ final class CollageRenderer {
         let centered = scaled.transformed(by: CGAffineTransform(translationX: xOffset, y: yOffset))
 
         return centered.cropped(to: CGRect(origin: .zero, size: targetSize))
+    }
+
+    /// Scales `image` to fit entirely inside `targetSize` (letterboxed, never cropped), preserving
+    /// its aspect ratio exactly. Used by the justified layout so photos are never distorted or cut.
+    private func fitContain(image: CIImage, to targetSize: CGSize) -> CIImage {
+        let originNormalized = image.transformed(
+            by: CGAffineTransform(translationX: -image.extent.origin.x, y: -image.extent.origin.y)
+        )
+        guard originNormalized.extent.width > 0, originNormalized.extent.height > 0 else {
+            return originNormalized
+        }
+
+        let widthScale = targetSize.width / originNormalized.extent.width
+        let heightScale = targetSize.height / originNormalized.extent.height
+        let scale = min(widthScale, heightScale)
+
+        let scaled = originNormalized.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        let xOffset = (targetSize.width - scaled.extent.width) / 2
+        let yOffset = (targetSize.height - scaled.extent.height) / 2
+        let centered = scaled.transformed(by: CGAffineTransform(translationX: xOffset, y: yOffset))
+
+        return centered.cropped(to: CGRect(origin: .zero, size: targetSize))
+    }
+
+    /// A solid white rect at `rect`'s absolute position. Used as the per-picture margin background
+    /// in the optimal layout.
+    private func whiteRect(_ rect: CGRect) -> CIImage {
+        let white = CIImage(color: CIColor(red: 1, green: 1, blue: 1))
+        return white.cropped(to: rect)
     }
 }

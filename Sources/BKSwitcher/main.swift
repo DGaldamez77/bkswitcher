@@ -123,6 +123,9 @@ func writeSelectedPhotoLog(
         lines.append("\(index + 1). \(selection.exportedURL.path)")
         lines.append("   assetLocalIdentifier: \(selection.assetLocalIdentifier)")
         lines.append("   originalFilename: \(selection.originalFilename)")
+        if let libraryUrl = selection.photosLibraryURL {
+            lines.append("   libraryUrl: \(libraryUrl.absoluteString)")
+        }
         if let photoTakenDate = selection.photoTakenDate {
             lines.append("   photoTakenDate: \(takenDateFormatter.string(from: photoTakenDate))")
         } else {
@@ -215,16 +218,20 @@ func runCycle(config: AppConfig, renderer: CollageRenderer, recreateLastRun: Boo
     let selected: [PhotosLibrarySelection]
     let layoutSeed: UInt64
     let tileGap: Double
+    let pictureMarginPixels: Double
+    let useOptimalLayout: Bool
 
     if recreateLastRun {
         let manifest = try RunManifest.loadLatest(in: outputDirectory)
-        logInfo("Recreating run \(manifest.stamp): \(manifest.photos.count) photo(s), layout seed \(manifest.layoutSeed), tile gap \(manifest.tileGap).")
+        logInfo("Recreating run \(manifest.stamp): \(manifest.photos.count) photo(s), layout seed \(manifest.layoutSeed), tile gap \(manifest.tileGap), picture margin \(manifest.pictureMarginPixels), optimal layout \(manifest.useOptimalLayout).")
         selected = try recreateSelections(
             manifest: manifest,
             stagingDirectory: stagingDirectory
         )
         layoutSeed = manifest.layoutSeed
         tileGap = manifest.tileGap
+        pictureMarginPixels = manifest.pictureMarginPixels
+        useOptimalLayout = manifest.useOptimalLayout
     } else {
         let neededCount = config.imageCount
         let excludedAlbumCount = config.normalizedExcludedAlbumNames().count
@@ -237,13 +244,16 @@ func runCycle(config: AppConfig, renderer: CollageRenderer, recreateLastRun: Boo
         )
         layoutSeed = UInt64.random(in: UInt64.min...UInt64.max)
         tileGap = config.tileGap
+        pictureMarginPixels = config.pictureMarginPixels
+        useOptimalLayout = config.useOptimalCollageLayout
     }
 
     logInfo("Prepared \(selected.count) photo(s) in \(stagingDirectory.path)")
     let selectedWithReadableLocation = selected.filter { $0.photoLocationText != nil }.count
     logInfo("Resolved readable location for \(selectedWithReadableLocation)/\(selected.count) selected photo(s).")
     let canvasSize = currentCanvasSize()
-    logInfo("Rendering collage at \(Int(canvasSize.width))x\(Int(canvasSize.height)) with tile gap \(tileGap) and layout seed \(layoutSeed).")
+    let layoutDescription = useOptimalLayout ? "optimal (picture margin \(pictureMarginPixels))" : "mosaic (tile gap \(tileGap))"
+    logInfo("Rendering collage at \(Int(canvasSize.width))x\(Int(canvasSize.height)) using \(layoutDescription) layout, layout seed \(layoutSeed).")
     let renderItems = selected.map { selection in
         CollageRenderItem(
             imageURL: selection.exportedURL,
@@ -256,7 +266,9 @@ func runCycle(config: AppConfig, renderer: CollageRenderer, recreateLastRun: Boo
         items: renderItems,
         canvasSize: canvasSize,
         gap: CGFloat(tileGap),
-        seed: layoutSeed
+        seed: layoutSeed,
+        useOptimalLayout: useOptimalLayout,
+        pictureMargin: CGFloat(pictureMarginPixels)
     )
 
     let destination = outputURL(in: outputDirectory, stamp: stamp)
@@ -273,6 +285,8 @@ func runCycle(config: AppConfig, renderer: CollageRenderer, recreateLastRun: Boo
         canvasHeight: Double(canvasSize.height),
         tileGap: tileGap,
         layoutSeed: layoutSeed,
+        pictureMarginPixels: pictureMarginPixels,
+        useOptimalLayout: useOptimalLayout,
         photos: selected.map { selection in
             RunManifestPhoto(
                 assetLocalIdentifier: selection.assetLocalIdentifier,
@@ -320,7 +334,7 @@ if arguments.contains("--init-config") {
     do {
         let url = try AppConfig.initializeTemplate(overwrite: false)
         print("Config ready: \(url.path)")
-        print("Adjust excludedAlbums/imageCount/tileGap as needed, then run bkswitcher.")
+        print("Adjust excludedAlbums/imageCount/tileGap/pictureMarginPixels/useOptimalCollageLayout as needed, then run bkswitcher.")
         exit(0)
     } catch {
         fputs("Failed to initialize config: \(error.localizedDescription)\n", stderr)

@@ -8,6 +8,16 @@ struct PhotosLibrarySelection {
     let exportedURL: URL
     let photoTakenDate: Date?
     let photoLocationText: String?
+
+    /// Deep link that opens this photo in the macOS Photos app.
+    var photosLibraryURL: URL? {
+        let uuid = assetLocalIdentifier.split(separator: "/").first.map(String.init) ?? assetLocalIdentifier
+        var components = URLComponents()
+        components.scheme = "photos"
+        components.host = "asset"
+        components.queryItems = [URLQueryItem(name: "identifier", value: uuid)]
+        return components.url
+    }
 }
 
 enum PhotosLibraryCollectorError: LocalizedError {

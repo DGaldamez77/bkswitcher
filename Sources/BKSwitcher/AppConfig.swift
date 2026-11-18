@@ -7,7 +7,7 @@ enum AppConfigError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .templateCreated(let url):
-            return "Created config template at \(url.path). Optionally set excludedAlbums/imageCount/tileGap, then run bkswitcher again."
+            return "Created config template at \(url.path). Optionally set excludedAlbums/imageCount/tileGap/pictureMarginPixels/useOptimalCollageLayout, then run bkswitcher again."
         case .invalidConfig(let message):
             return "Invalid config: \(message)"
         }
@@ -24,6 +24,11 @@ struct AppConfig: Codable {
     /// Restarting the Dock un-minimizes every minimized window, so the legacy Dock wallpaper
     /// fallback stays off unless explicitly enabled.
     var allowDockRestart: Bool
+    /// White border drawn around every picture in the optimal collage layout, in pixels.
+    var pictureMarginPixels: Double
+    /// Feature flag selecting the new proportion-preserving, tightly-packed collage layout
+    /// instead of the legacy cropped mosaic layout.
+    var useOptimalCollageLayout: Bool
 
     static let configDirectoryName = "BKSwitcher"
     static let configFileName = "config.json"
@@ -39,6 +44,8 @@ struct AppConfig: Codable {
         case refreshIntervalMinutes
         case allowedExtensions
         case allowDockRestart
+        case pictureMarginPixels
+        case useOptimalCollageLayout
     }
 
     static var defaultValue: AppConfig {
@@ -49,7 +56,9 @@ struct AppConfig: Codable {
             outputDirectory: "~/Library/Caches/BKSwitcher",
             refreshIntervalMinutes: 15,
             allowedExtensions: ["jpg", "jpeg", "png", "heic", "heif", "tif", "tiff"],
-            allowDockRestart: false
+            allowDockRestart: false,
+            pictureMarginPixels: 15,
+            useOptimalCollageLayout: true
         )
     }
 
@@ -121,6 +130,9 @@ struct AppConfig: Codable {
         guard !allowedExtensionSet().isEmpty else {
             throw AppConfigError.invalidConfig("allowedExtensions cannot be empty.")
         }
+        guard pictureMarginPixels >= 0 else {
+            throw AppConfigError.invalidConfig("pictureMarginPixels cannot be negative.")
+        }
     }
 }
 
@@ -149,6 +161,8 @@ extension AppConfig {
         refreshIntervalMinutes = try container.decode(Int.self, forKey: .refreshIntervalMinutes)
         allowedExtensions = try container.decode([String].self, forKey: .allowedExtensions)
         allowDockRestart = try container.decodeIfPresent(Bool.self, forKey: .allowDockRestart) ?? false
+        pictureMarginPixels = try container.decodeIfPresent(Double.self, forKey: .pictureMarginPixels) ?? 15
+        useOptimalCollageLayout = try container.decodeIfPresent(Bool.self, forKey: .useOptimalCollageLayout) ?? true
     }
 
     func encode(to encoder: Encoder) throws {
@@ -160,5 +174,7 @@ extension AppConfig {
         try container.encode(refreshIntervalMinutes, forKey: .refreshIntervalMinutes)
         try container.encode(allowedExtensions, forKey: .allowedExtensions)
         try container.encode(allowDockRestart, forKey: .allowDockRestart)
+        try container.encode(pictureMarginPixels, forKey: .pictureMarginPixels)
+        try container.encode(useOptimalCollageLayout, forKey: .useOptimalCollageLayout)
     }
 }

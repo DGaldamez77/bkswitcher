@@ -36,6 +36,13 @@ swift run bkswitcher --init-config
 This creates:
 `~/Library/Application Support/BKSwitcher/config.json`
 
+## See the photos in the current background
+```bash
+swift run bkswitcher --current-images
+```
+
+Opens a window with a thumbnail grid of every photo used in the most recent collage (the current background), each with its filename, date taken, and location. Click a photo (or its description) to copy its file name to the clipboard. Right-click for **Open in Photos**, **Open Exported Copy**, or **Show in Finder**. **Open Collage** opens the full collage image. Photos are read from the run's exported copies, so this window does not need Photos library access.
+
 ## Edit settings in a window
 ```bash
 swift run bkswitcher --config

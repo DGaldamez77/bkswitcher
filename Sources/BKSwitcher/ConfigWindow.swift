@@ -263,7 +263,7 @@ final class ConfigWindowController: NSObject, NSWindowDelegate {
 func runConfigWindow(config: AppConfig) -> Never {
     let app = NSApplication.shared
     app.setActivationPolicy(.regular)
-    app.mainMenu = makeConfigMainMenu()
+    app.mainMenu = makeStandardMainMenu(appName: "BKSwitcher Settings")
 
     let controller = ConfigWindowController(config: config)
     controller.show()
@@ -274,13 +274,13 @@ func runConfigWindow(config: AppConfig) -> Never {
 }
 
 /// A minimal menu bar so standard shortcuts (copy/paste, select all, undo, close, quit) work in the
-/// text fields; a programmatically launched app has no menu otherwise.
-private func makeConfigMainMenu() -> NSMenu {
+/// command-line-launched windows; a programmatically launched app has no menu otherwise.
+func makeStandardMainMenu(appName: String) -> NSMenu {
     let mainMenu = NSMenu()
 
     let appItem = NSMenuItem()
     let appMenu = NSMenu()
-    appMenu.addItem(withTitle: "Quit BKSwitcher Settings", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+    appMenu.addItem(withTitle: "Quit \(appName)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
     appItem.submenu = appMenu
     mainMenu.addItem(appItem)
 

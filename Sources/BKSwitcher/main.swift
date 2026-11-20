@@ -27,6 +27,8 @@ func printUsage() {
           bkswitcher --loop          Run continuously using refreshIntervalMinutes from config
           bkswitcher --init-config   Create config template at ~/Library/Application Support/BKSwitcher/config.json
           bkswitcher --config        Open a window to review and edit all settings
+          bkswitcher --current-images
+                                     Open a window showing the photos used in the current background
           bkswitcher --help          Show this help
         """
     )
@@ -357,6 +359,17 @@ if arguments.contains("--config") {
         config = AppConfig.defaultValue
     }
     runConfigWindow(config: config)
+}
+
+if arguments.contains("--current-images") {
+    do {
+        let outputDirectory = try AppConfig.loadForEditing().resolvedOutputDirectoryURL()
+        let manifest = try RunManifest.loadLatest(in: outputDirectory)
+        runCurrentImagesWindow(manifest: manifest, outputDirectory: outputDirectory)
+    } catch {
+        fputs("\(error.localizedDescription)\n", stderr)
+        exit(1)
+    }
 }
 
 let shouldRecreateLastRun = arguments.contains("-r") || arguments.contains("--recreate")

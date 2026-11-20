@@ -103,6 +103,28 @@ struct AppConfig: Codable {
         return config
     }
 
+    /// Loads the config for the settings window. Unlike `load()`, a missing file yields the
+    /// defaults and values are not validated, so the user can open the window to fix them.
+    static func loadForEditing() throws -> AppConfig {
+        let url = configURL
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return defaultValue
+        }
+        return try JSONDecoder().decode(AppConfig.self, from: Data(contentsOf: url))
+    }
+
+    /// Writes this config to `configURL` in the same format as the generated template.
+    func save() throws {
+        let destination = AppConfig.configURL
+        try FileManager.default.createDirectory(
+            at: destination.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(self).write(to: destination, options: .atomic)
+    }
+
     func normalizedExcludedAlbumNames() -> [String] {
         excludedAlbums
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -121,7 +143,7 @@ struct AppConfig: Codable {
         )
     }
 
-    private func validate() throws {
+    func validate() throws {
         guard imageCount > 0 else {
             throw AppConfigError.invalidConfig("imageCount must be greater than zero.")
         }

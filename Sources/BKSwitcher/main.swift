@@ -26,6 +26,7 @@ func printUsage() {
           bkswitcher -r              Recreate the last run's collage from the same photos and layout
           bkswitcher --loop          Run continuously using refreshIntervalMinutes from config
           bkswitcher --init-config   Create config template at ~/Library/Application Support/BKSwitcher/config.json
+          bkswitcher --config        Open a window to review and edit all settings
           bkswitcher --help          Show this help
         """
     )
@@ -345,6 +346,17 @@ if arguments.contains("--init-config") {
         fputs("Failed to initialize config: \(error.localizedDescription)\n", stderr)
         exit(1)
     }
+}
+
+if arguments.contains("--config") {
+    let config: AppConfig
+    do {
+        config = try AppConfig.loadForEditing()
+    } catch {
+        fputs("Could not read \(AppConfig.configURL.path): \(error.localizedDescription)\nOpening the settings window with default values; saving will overwrite that file.\n", stderr)
+        config = AppConfig.defaultValue
+    }
+    runConfigWindow(config: config)
 }
 
 let shouldRecreateLastRun = arguments.contains("-r") || arguments.contains("--recreate")

@@ -36,6 +36,13 @@ swift run bkswitcher --init-config
 This creates:
 `~/Library/Application Support/BKSwitcher/config.json`
 
+## Edit settings in a window
+```bash
+swift run bkswitcher --config
+```
+
+Opens a settings window showing every option below, with a short description of each. **Save** validates the values, writes them to `config.json`, and closes the window; **Cancel** (or closing the window) discards changes. If the config file doesn't exist yet, the window starts from the defaults and Save creates it.
+
 ## Example config
 ```json
 {

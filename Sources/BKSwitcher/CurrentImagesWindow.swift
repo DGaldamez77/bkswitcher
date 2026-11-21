@@ -198,15 +198,17 @@ private struct CurrentImageCard: View {
     }
 }
 
-/// Hosts the photo grid for `bkswitcher --current-images`. Closing the window exits the process.
+/// Hosts the photo grid for the current background. `onClose` runs when the window closes.
 final class CurrentImagesWindowController: NSObject, NSWindowDelegate {
     private let manifest: RunManifest
     private let items: [CurrentImageItem]
     private let collageURL: URL
+    private let onClose: () -> Void
     private var window: NSWindow?
 
-    init(manifest: RunManifest, outputDirectory: URL) {
+    init(manifest: RunManifest, outputDirectory: URL, onClose: @escaping () -> Void) {
         self.manifest = manifest
+        self.onClose = onClose
         let photosDirectory = outputDirectory.appendingPathComponent("used-photos/\(manifest.stamp)", isDirectory: true)
         self.items = manifest.photos.enumerated().map { index, photo in
             CurrentImageItem(
@@ -240,8 +242,14 @@ final class CurrentImagesWindowController: NSObject, NSWindowDelegate {
         self.window = window
     }
 
+    /// Brings an already-open window back to the front.
+    func bringToFront() {
+        NSApp.activate(ignoringOtherApps: true)
+        window?.makeKeyAndOrderFront(nil)
+    }
+
     func windowWillClose(_ notification: Notification) {
-        NSApp.terminate(nil)
+        onClose()
     }
 }
 
@@ -251,7 +259,9 @@ func runCurrentImagesWindow(manifest: RunManifest, outputDirectory: URL) -> Neve
     app.setActivationPolicy(.regular)
     app.mainMenu = makeStandardMainMenu(appName: "BKSwitcher Current Images")
 
-    let controller = CurrentImagesWindowController(manifest: manifest, outputDirectory: outputDirectory)
+    let controller = CurrentImagesWindowController(manifest: manifest, outputDirectory: outputDirectory) {
+        NSApp.terminate(nil)
+    }
     controller.show()
     app.activate(ignoringOtherApps: true)
     app.run()

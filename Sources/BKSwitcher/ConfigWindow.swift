@@ -195,15 +195,23 @@ private struct LabeledField: View {
 
 /// Hosts the settings form in a standalone window for `bkswitcher --config`. Save validates and
 /// writes the config file; Cancel (or closing the window) discards changes. Either way the window
-/// closes and the process exits.
+/// closes and `onClose` is called with whether the settings were saved.
 final class ConfigWindowController: NSObject, NSWindowDelegate {
     private let model: ConfigFormModel
+    private let onClose: (Bool) -> Void
     private var window: NSWindow?
     private var didSave = false
     private var didFinish = false
 
-    init(config: AppConfig) {
+    init(config: AppConfig, onClose: @escaping (_ saved: Bool) -> Void) {
         model = ConfigFormModel(config: config)
+        self.onClose = onClose
+    }
+
+    /// Brings an already-open settings window back to the front.
+    func bringToFront() {
+        NSApp.activate(ignoringOtherApps: true)
+        window?.makeKeyAndOrderFront(nil)
     }
 
     func show() {
@@ -254,8 +262,7 @@ final class ConfigWindowController: NSObject, NSWindowDelegate {
             return
         }
         didFinish = true
-        print(didSave ? "Settings saved to \(AppConfig.configURL.path)" : "Settings unchanged.")
-        NSApp.terminate(nil)
+        onClose(didSave)
     }
 }
 
@@ -265,7 +272,10 @@ func runConfigWindow(config: AppConfig) -> Never {
     app.setActivationPolicy(.regular)
     app.mainMenu = makeStandardMainMenu(appName: "BKSwitcher Settings")
 
-    let controller = ConfigWindowController(config: config)
+    let controller = ConfigWindowController(config: config) { saved in
+        print(saved ? "Settings saved to \(AppConfig.configURL.path)" : "Settings unchanged.")
+        NSApp.terminate(nil)
+    }
     controller.show()
     app.activate(ignoringOtherApps: true)
     app.run()

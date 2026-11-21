@@ -29,6 +29,7 @@ func printUsage() {
           bkswitcher --config        Open a window to review and edit all settings
           bkswitcher --current-images
                                      Open a window showing the photos used in the current background
+          bkswitcher --menubar       Run as a menu bar app (the default when launched as BKSwitcher.app)
           bkswitcher --help          Show this help
         """
     )
@@ -210,7 +211,12 @@ func pruneOldCollages(in directory: URL, keep count: Int) -> Int {
     return removedRunCount
 }
 
-func runCycle(config: AppConfig, renderer: CollageRenderer, recreateLastRun: Bool = false) throws {
+func runCycle(
+    config: AppConfig,
+    renderer: CollageRenderer,
+    recreateLastRun: Bool = false,
+    canvasSize requestedCanvasSize: CGSize? = nil
+) throws {
     let outputDirectory = config.resolvedOutputDirectoryURL()
     let stamp = runStamp()
     let stagingDirectory = selectedPhotosDirectory(in: outputDirectory, stamp: stamp)
@@ -257,7 +263,7 @@ func runCycle(config: AppConfig, renderer: CollageRenderer, recreateLastRun: Boo
     logInfo("Prepared \(selected.count) photo(s) in \(stagingDirectory.path)")
     let selectedWithReadableLocation = selected.filter { $0.photoLocationText != nil }.count
     logInfo("Resolved readable location for \(selectedWithReadableLocation)/\(selected.count) selected photo(s).")
-    let canvasSize = currentCanvasSize()
+    let canvasSize = requestedCanvasSize ?? currentCanvasSize()
     let layoutDescription = useOptimalLayout ? "optimal (picture margin \(pictureMarginPixels), picture spacing \(pictureSpacingPixels))" : "mosaic (tile gap \(tileGap))"
     logInfo("Rendering collage at \(Int(canvasSize.width))x\(Int(canvasSize.height)) using \(layoutDescription) layout, layout seed \(layoutSeed).")
     let renderItems = selected.map { selection in
@@ -324,10 +330,15 @@ func runCycle(config: AppConfig, renderer: CollageRenderer, recreateLastRun: Boo
     print("Selected photo list: \(logURL.path)")
 }
 
-func runManagedCycle(config: AppConfig, renderer: CollageRenderer, recreateLastRun: Bool = false) throws {
+func runManagedCycle(
+    config: AppConfig,
+    renderer: CollageRenderer,
+    recreateLastRun: Bool = false,
+    canvasSize: CGSize? = nil
+) throws {
     try autoreleasepool {
         defer { renderer.clearCaches() }
-        try runCycle(config: config, renderer: renderer, recreateLastRun: recreateLastRun)
+        try runCycle(config: config, renderer: renderer, recreateLastRun: recreateLastRun, canvasSize: canvasSize)
     }
 }
 
@@ -336,6 +347,14 @@ let arguments = Set(CommandLine.arguments.dropFirst())
 if arguments.contains("--help") || arguments.contains("-h") {
     printUsage()
     exit(0)
+}
+
+// Launched from Finder/Applications (no arguments, inside an .app bundle) or with --menubar: run as
+// a menu bar app. macOS may add a "-psn_..." process serial number argument on some launches.
+let launchedAsAppBundle = Bundle.main.bundleURL.pathExtension == "app"
+let userArguments = arguments.filter { !$0.hasPrefix("-psn_") }
+if arguments.contains("--menubar") || (launchedAsAppBundle && userArguments.isEmpty) {
+    runMenuBarApp()
 }
 
 if arguments.contains("--init-config") {

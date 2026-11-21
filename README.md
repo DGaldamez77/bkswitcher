@@ -22,6 +22,32 @@ Two collage layouts are available, selected by the `useOptimalCollageLayout` con
 - **Optimal layout** (`useOptimalCollageLayout: true`, the default): a scattered, collage-style arrangement. The canvas is recursively partitioned into randomly-sized cells so every region of the screen gets a photo; each photo then starts at a random size and position inside its cell and is nudged/grown toward open space, so pictures don't line up in rows or columns. Photos are never cropped and keep their original proportions. Each photo gets a white margin (`pictureMarginPixels`, default 15) hugging its own edges, and framed photos always stay at least `pictureSpacingPixels` (default 10) apart so borders never touch. The date (`MM/DD/YYYY`) and location are printed in small black text inside the white margin (date above the photo, location below) rather than over the photo itself.
 - **Legacy mosaic layout** (`useOptimalCollageLayout: false`): recursively splits the canvas into randomly-sized rects and crops each photo to fill its rect exactly, separated by `tileGap` pixels of black background.
 
+## Menu bar app
+BKSwitcher can also run as a menu bar app with its own icon, so it can live in `/Applications`.
+
+Build the app bundle (and optionally install it):
+```bash
+scripts/build-app.sh            # builds build/BKSwitcher.app
+scripts/build-app.sh --install  # builds and copies it to /Applications (quitting a running copy first)
+```
+
+Opening `BKSwitcher.app` shows only an icon in the menu bar (no Dock icon). Its menu mirrors the command line:
+
+| Menu item | Command line equivalent |
+|---|---|
+| New Background | `bkswitcher` |
+| Recreate Last Background | `bkswitcher -r` |
+| Current Images… | `bkswitcher --current-images` |
+| Configuration… | `bkswitcher --config` |
+| Open Output Folder | opens `outputDirectory` |
+| Auto Refresh Every N Minutes | `bkswitcher --loop` (uses `refreshIntervalMinutes`; on by default, remembered between launches) |
+
+**Launch at Login** (checkmark) starts BKSwitcher automatically when you log in; it shows up in System Settings > General > Login Items, where it can also be turned off. Install the app in `/Applications` first so the login item points at the copy you keep. If macOS asks for approval, the menu opens Login Items settings for you.
+
+The top line of the menu shows when the background was last updated, or why the last update failed. The first time it builds a collage, macOS asks for permission for **BKSwitcher** to access Photos and to control Finder/System Events.
+
+The app icon is drawn by `scripts/make-icon.swift`; run `scripts/build-app.sh --regenerate-icon` after changing it to rebuild `Packaging/AppIcon.icns`. You can also start the menu bar mode from a terminal with `bkswitcher --menubar`.
+
 ## Build
 ```bash
 swift build

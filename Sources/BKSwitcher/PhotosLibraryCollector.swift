@@ -28,6 +28,9 @@ enum PhotosLibraryCollectorError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .accessDenied:
+            if Bundle.main.bundleURL.pathExtension == "app" {
+                return "Photos library access denied. Grant access to BKSwitcher in System Settings > Privacy & Security > Photos."
+            }
             let termProgram = ProcessInfo.processInfo.environment["TERM_PROGRAM"]?.lowercased() ?? ""
             if termProgram == "vscode" {
                 return "Photos library access denied. Grant access to Visual Studio Code in System Settings > Privacy & Security > Photos."
@@ -344,7 +347,11 @@ struct PhotosLibraryCollector {
 
         let deadline = Date().addingTimeInterval(4)
         while !didComplete && Date() < deadline {
-            _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
+            // On a background thread the run loop has no input sources and returns immediately;
+            // the geocoder then calls back on the main thread, so just wait briefly instead of spinning.
+            if !RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05)) {
+                Thread.sleep(forTimeInterval: 0.05)
+            }
         }
         if !didComplete {
             geocoder.cancelGeocode()

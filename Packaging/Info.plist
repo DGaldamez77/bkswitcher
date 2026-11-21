@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>BKSwitcher</string>
+    <key>CFBundleDisplayName</key>
+    <string>BKSwitcher</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.david.bkswitcher</string>
+    <key>CFBundleExecutable</key>
+    <string>bkswitcher</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.photography</string>
+    <!-- Menu bar only: no Dock icon and no app menu bar while running. -->
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>BKSwitcher picks random photos from your Photos library to build your desktop wallpaper collage.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>BKSwitcher uses Finder and System Events to set the collage as your desktop wallpaper.</string>
+</dict>
+</plist>
